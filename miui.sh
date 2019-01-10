@@ -1,4 +1,7 @@
 #!/bin/sh
+# use # before the application name you dont want to remove example :
+# adb shell pm uninstall --user 0 com.hugging.bloatware #Name of app
+
 adb shell pm uninstall --user 0 com.android.browser #Mi Browser
 adb shell pm uninstall --user 0 com.android.calendar #Calendario
 adb shell pm uninstall --user 0 com.android.deskclock #Reloj
