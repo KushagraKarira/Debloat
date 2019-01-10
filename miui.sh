@@ -30,3 +30,7 @@ adb shell pm uninstall --user 0 com.google.android.inputmethod.latin #Gboard
 adb shell pm uninstall --user 0 com.google.android.music #Google Music
 adb shell pm uninstall --user 0 com.google.android.videos #Play Movies
 adb shell pm uninstall --user 0 com.google.android.youtube #Youtube
+
+echo Mail me the complete list of Xiaomi apps with device model to speed up the progress.
+echo Mail id : festophobia@gmail.com
+echo or directly contribute to https://github.com/KushagraKarira/Unbloat
