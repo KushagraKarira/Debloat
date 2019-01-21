@@ -8,7 +8,5 @@ How to :
 4. Edit it, Comment out all the apps that you might need
 5. Run the script
 
-( Optional )
-before running the script,
-execute : adb shell pm list
-and mail me the output. It is the list of all the apps installed on your device, this will help us improve.
+>> Currently miui supported
+>> I'll update once per month because of ongoing studies, if you have any suggestion or request get it on the issues board.
