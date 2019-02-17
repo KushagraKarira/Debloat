@@ -10,3 +10,8 @@ How to :
 
 >> Currently miui supported
 >> I'll update once per month because of ongoing studies, if you have any suggestion or request get it on the issues board.
+
+## TO DO
+[ ] Seprate the Google bloatware
+[ ] Un- Google script, that will remove most g-apps and replace them with the open source ones.
+[ ] Create BATCH scripts >> Not anytime soon, I hate Windows.
