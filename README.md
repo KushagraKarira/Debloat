@@ -1,8 +1,7 @@
 # Unbloat
 Take back your privacy without root
 
->> Currently miui supported
->> I'll update once per month because of ongoing studies, if you have any suggestion or request get it on the issues board.
+>> If you dont know what it is or what it does, Please STAY AWAY !!
 
 ## TO DO
 - [x] MIUI 10 Unbloat BASH script
