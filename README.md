@@ -1,7 +1,9 @@
 # Unbloat
 Take back your privacy without root
 
->> If you dont know what it is or what it does, Please STAY AWAY !!
+## Suspended
+### After latest test that almost bricked my phone and i had to format it. I am suspending this project to be used by public.
+
 
 ## TO DO
 - [x] MIUI 10 Unbloat BASH script
