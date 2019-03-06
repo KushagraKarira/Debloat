@@ -1,12 +1,5 @@
 # Unbloat
-Simple sh script to unbloat your device
-
-How to :
-1. Download the repository as .ZIP
-2. Extract it
-3. Find the SH file for your ROM
-4. Edit it, Comment out all the apps that you might need
-5. Run the script
+Take back your privacy without root
 
 >> Currently miui supported
 >> I'll update once per month because of ongoing studies, if you have any suggestion or request get it on the issues board.
@@ -14,5 +7,6 @@ How to :
 ## TO DO
 - [x] MIUI 10 Unbloat BASH script
 - [ ] Seprate the Google bloatware
+- [ ] Option to replace with open-source alternatives
 - [ ] Un-Google script, that will remove most g-apps and replace them with the open source ones.
 - [ ] Create BATCH scripts >> Not anytime soon, I hate Windows.
