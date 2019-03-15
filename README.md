@@ -1,9 +1,7 @@
 # Unbloat
 Take back your privacy without root
 
-## Suspended
-### After latest test that almost bricked my phone and i had to format it. I am suspending this project to be used by public.
-
+### Turn off the find device feature before removing mi cloud
 
 ## TO DO
 - [x] MIUI 10 Unbloat BASH script
