@@ -3,6 +3,7 @@ adb shell pm uninstall --user 0 com.android.browser #Mi Browser
 adb shell pm uninstall --user 0 com.android.calendar #Calendar
 adb shell pm uninstall --user 0 com.android.chrome #Google Chrome
 adb shell pm uninstall --user 0 com.android.mms #Messages
+adb shell pm uninstall --user 0 com.mipay.wallet.in #Mi Wallet India
 adb shell pm uninstall --user 0 com.autonavi.minimap
 adb shell pm uninstall --user 0 com.baidu.duersdk.opensdk
 adb shell pm uninstall --user 0 com.baidu.input_mi
