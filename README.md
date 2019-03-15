@@ -12,6 +12,7 @@ Take back your privacy without root
 
 ## More Info
 This is a free time project for the Community <3
+
 Support development @PayPal
 https://www.paypal.me/kushagrakarira
 
