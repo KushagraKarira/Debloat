@@ -10,5 +10,8 @@ Take back your privacy without root
 - [ ] Un-Google script, that will remove most g-apps and replace them with the open source ones.
 - [ ] Create BATCH scripts >> Not anytime soon, I hate Windows.
 
-# Thank me @PayPal
+
+## This is a free time project for the Community <3
+## Support development @PayPal
 ## https://www.paypal.me/kushagrakarira
+## Or follow me twitter.com/kushagrakarira
