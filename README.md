@@ -14,4 +14,5 @@ Take back your privacy without root
 This is a free time project for the Community <3
 Support development @PayPal
 https://www.paypal.me/kushagrakarira
+
 Or follow me https://www.twitter.com/kushagrakarira
