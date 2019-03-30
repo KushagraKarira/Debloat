@@ -4,7 +4,7 @@ Get those shinny adds off your cute smartphone
 ### MiUi Warning : Turn off Find Device
 
 ## TO DO
-- [x] MIUI 10 Unbloat BASH script
+- [x] MIUI 10 Debloat BASH script
 - [x] Seprate the Google bloatware
 - [x] Samsung Debloat ( Not tested )
 - [ ] Option to replace with open-source alternatives
