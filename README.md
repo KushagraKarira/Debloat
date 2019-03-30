@@ -20,8 +20,8 @@ Or follow me https://www.twitter.com/kushagrakarira
 
 # Screenshots
 ## > Clean Homescreen
-![Screenshot](/Screenshot_2019-03-18-18-26-54-889_com.miui.home.png)
+![Screenshot](/HomeScreen.png)
 
 ## > Minimum ram usage. Low ram usage means better battery life
-![Screenshot](/Screenshot_2019-03-18-20-56-18-888_com.android.systemui.png)
+![Screenshot](/RecentScreen.png)
 
