@@ -1,4 +1,7 @@
 # Debloat
+
+## I've got an Android One phone, so this project needs contributors.
+
 It started as a personal  project with me getting those ADs off my RN4X and then Debloating 2 other MI phones.
 The results were outstanding.
 > Better battery life.
