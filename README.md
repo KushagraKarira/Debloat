@@ -1,6 +1,6 @@
 # Debloat
 
-## UPDATE : Moved to my Scripts Repo.
+## UPDATE : Moved to my Scripts Repo. : https://github.com/KushagraKarira/Scripts
 
 ## I've got an Android One phone, so this project needs contributors.
 
