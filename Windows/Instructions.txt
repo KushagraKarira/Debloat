@@ -1,0 +1,14 @@
+Listen,
+These are the instructions :
+Listed in this folder are additional files with the extension .bat
+those are the debloat scripts and are to be used safely, they can seriously damage your phone and i'm not responsible.
+
+for miui dissable the find device shit ( if the system still has it ) to not let your phone not get fucked up.
+**again, i'm not a bit responsible for your loss.
+ABOVE LINE IS A WARNING AS WELL
+
+Everything else,
+for anything else feel free to contact me for suggestions at my github profile (kushagrakarira)
+
+-> the folder here is android development things that has adb ( i seriously dont know anything about installing adb on Windows )
+-> The folder is downloaded from https://developer.android.com/studio/releases/platform-tools.html on 2019/11/01
