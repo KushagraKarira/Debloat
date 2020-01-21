@@ -1,4 +1,5 @@
 #!/bin/sh
+sudo apt install adb fastboot
 adb shell pm uninstall --user 0 com.android.browser #Mi Browser
 adb shell pm uninstall --user 0 com.android.calendar #Calendar
 adb shell pm uninstall --user 0 com.android.chrome #Google Chrome
