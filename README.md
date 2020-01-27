@@ -16,6 +16,7 @@ The results were outstanding.
 - [x] Samsung Debloat ( Not tested ) - samsung.sh
 - [x] Option to replace with open-source alternatives - replace.sh
 - [x] Create BATCH scripts for Windows - Download Windows adb seprately and execute
+- [x] Digispark ATTiny85 Keyboard script to ease up the process to plug and debloat !!
 
 ## How to use :
 
