@@ -17,6 +17,7 @@ The results were outstanding.
 - [x] Option to replace with open-source alternatives - replace.sh
 - [x] Create BATCH scripts for Windows - Download Windows adb seprately and execute
 - [x] Digispark ATTiny85 Keyboard script to ease up the process to plug and debloat !!
+- [x] Added file for GOG Lenavo Tablet  TB-7504X
 
 ## How to use :
 
