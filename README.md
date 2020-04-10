@@ -18,6 +18,7 @@ The results were outstanding.
 - [x] Create BATCH scripts for Windows - Download Windows adb seprately and execute
 - [x] Digispark ATTiny85 Keyboard script to ease up the process to plug and debloat !!
 - [x] Added file for GOG Lenavo Tablet  TB-7504X
+- [X] Added W10 Debloat script
 
 ## How to use :
 
@@ -36,8 +37,15 @@ The results were outstanding.
 ## > Minimum ram usage > Improves battery life
 ![Screenshot](/RecentScreen.png)
 
+
+### Update
+> Thank you guys for amazing suppport, i was not prepared for this response. Thanks
+> Getting back to the project, havent done much progress lately than the GOG Tablet
+> I've added Windows 10 debloat files, slightly combined from various other repos. ( Credits given in dir readme )
+> Ya, that's all - Now debloat Andrioid and W10, and if there's another app / device, let me know
+
 ## More Info
 This is a free time project for the Community <3
 
-Follow me https://www.twitter.com/kushagrakarira
-
+Intrested ?
+Check out my Scripts repo and website : karira.me
