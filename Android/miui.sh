@@ -1,6 +1,9 @@
 #!/bin/sh
+#Added apps from Mi 6 Pro
 sudo apt install adb fastboot
 adb shell pm uninstall --user 0 com.android.browser #Mi Browser
+adb shell pm uninstall --user 0 com.mi.globalbrowser #Mi Browser
+adb shell pm uninstall --user 0 com.facemoji.lite.xiaomi #Facemoji
 adb shell pm uninstall --user 0 com.android.calendar #Calendar
 adb shell pm uninstall --user 0 com.android.chrome #Google Chrome
 adb shell pm uninstall --user 0 com.android.mms #Messages
