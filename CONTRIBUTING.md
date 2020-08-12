@@ -4,4 +4,6 @@
 3. Fix - Sometimes things don't work the way you want them to ( Like the addition i made for Windows ADB ) and need bugs to be fixed
 4. Report bugs - Use the scripts, become a hero among your peers for improving their device and share the problems you face
 5. Feature request - Is there something you expect from the projet, let us know
-6. Document !! - Looks insignificant but of great importance, help other understand the project
+6. [Documentation](#Documentation); !! - Looks insignificant but of great importance, help other understand the project
+
+### Documentation
