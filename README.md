@@ -32,10 +32,10 @@ The results were outstanding.
 
 # Screenshots
 ## > Declutter your app launcher
-![Screenshot](/HomeScreen.png)
+![HomeSreen <](/HomeScreen.png)
 
 ## > Minimum ram usage > Improves battery life
-![Screenshot](/RecentScreen.png)
+![RecentScreen >](/RecentScreen.png)
 
 
 ### Update
