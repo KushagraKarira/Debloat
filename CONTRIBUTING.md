@@ -7,3 +7,9 @@
 6. [Documentation](#Documentation); !! - Looks insignificant but of great importance, help other understand the project
 
 ### Documentation
+#### Here's what you can help us with
+- Landing website
+- Readme file ( Tracking all the task that have been done and adding a to-do from issues and bug requests )
+- Foratting markdown files
+- logo ! Yes we need a logo if we want to grow bigg
+- and someone to edit this file too..
