@@ -32,6 +32,8 @@ The results were outstanding.
 
 # Screenshots
 ## > Declutter your app launcher
+<img src=HomeScreen.png width=50% height=50%>
+<img src=RecentScreen.png width=50% height=50%>
 ![HomeSreen <](/HomeScreen.png)
 
 ## > Minimum ram usage > Improves battery life
