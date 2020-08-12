@@ -31,10 +31,8 @@ The results were outstanding.
 ### In case of an accident go to apkmirror.com and help yourself
 
 # Screenshots
-## > Declutter your app launcher
-## > Minimum ram usage > Improves battery life
-<img src=HomeScreen.png width=40% height=40% style="float: left;">
-<img src=HomeScreen.png width=40% height=40% style="float: right;">
+<img src=HomeScreen.png width=40% height=40% align="left;">
+<img src=HomeScreen.png width=40% height=40% align="right">
 
 
 ### Update
