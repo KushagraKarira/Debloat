@@ -10,12 +10,12 @@ The results were outstanding.
 ### MiUi Warning : Turn off Find Device
 
 ## PROJECT TO DO
-- [x] MIUI 10 Debloat BASH script - miui.sh ( Development Stopped )
+- [x] Update miui.sh to support MiUi 12 ( Already supports MiUi 10 )
 - [x] Seprate the Google bloatware google.sh
 - [ ] All-in-one Android script
-- [x] Samsung Debloat ( Not tested ) - samsung.sh
-- [x] Option to replace with open-source alternatives - replace.sh
-- [x] Create BATCH scripts for Windows - Download Windows adb seprately and execute
+- [x] Samsung Debloat - samsung.sh
+- [ ] Option to replace with open-source alternatives - replace.sh
+- [ ] Create BATCH scripts for Windows
 - [x] Digispark ATTiny85 Keyboard script to ease up the process to plug and debloat !!
 - [x] Added file for GOG Lenavo Tablet  TB-7504X
 - [X] Added W10 Debloat script
