@@ -33,8 +33,8 @@ The results were outstanding.
 # Screenshots
 ## > Declutter your app launcher
 ## > Minimum ram usage > Improves battery life
-<img style="float: left;" src=HomeScreen.png width=50% height=50%>
-<img style="float: right;" src=HomeScreen.png width=50% height=50%>
+<img src=HomeScreen.png width=50% height=50% style="float: left;">
+<img src=HomeScreen.png width=50% height=50% style="float: right;">
 
 
 ### Update
