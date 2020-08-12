@@ -31,8 +31,8 @@ The results were outstanding.
 ### In case of an accident go to apkmirror.com and help yourself
 
 # Screenshots
-<img src=HomeScreen.png width=40% height=40% align="left;">
-<img src=HomeScreen.png width=40% height=40% align="right">
+<img src=HomeScreen.png width=40% height=40% align: left;>
+<img src=HomeScreen.png width=40% height=40% align: right;>
 
 
 ### Update
