@@ -1,0 +1,7 @@
+data/org.kushagrakarira.debloat.desktop.in
+data/org.kushagrakarira.debloat.appdata.xml.in
+data/org.kushagrakarira.debloat.gschema.xml
+src/debloated-window.ui
+src/main.c
+src/debloated-window.c
+

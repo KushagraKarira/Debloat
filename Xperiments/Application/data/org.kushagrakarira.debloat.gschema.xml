@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="debloated">
+	<schema id="org.kushagrakarira.debloat" path="/org/kushagrakarira/debloat/">
+	</schema>
+</schemalist>
