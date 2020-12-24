@@ -46,8 +46,7 @@ adb shell pm uninstall --user 0 com.google.android.marvin.talkback
 adb shell pm uninstall --user 0 com.android.BBKTools
 adb shell pm uninstall --user 0 com.vivo.collage
 adb shell pm uninstall --user 0 com.vivo.widget.calendar
-adb shell pm uninstall --user 0 com.android.browser
-adb shell pm uninstall --user 0 com.android.skin
+adb shell pm uninstall --user 0 com.android.skins
 adb shell pm uninstall --user 0 com.vivo.weather
 adb shell pm uninstall --user 0 com.facebook.system
 adb shell pm uninstall --user 0 com.vivo.dream.music
