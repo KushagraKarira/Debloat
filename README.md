@@ -36,7 +36,7 @@ Better control
 
 # Screenshots
 <img src=HomeScreen.png width=40% height=40% align: left>
-<img src=HomeScreen.png width=40% height=40% align: right>
+<img src=RecentScreen.png width=40% height=40% align: right>
 
 
 ### Update
