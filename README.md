@@ -18,7 +18,7 @@ The results were outstanding.
 - [ ] Create BATCH scripts for Windows
 - [x] Added file for GOG Lenavo Tablet  TB-7504X
 - [X] Added W10 Debloat script
-- [x] RealMe scrit
+- [x] RealMe script
 
 ## How to use :
 
