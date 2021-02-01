@@ -2,10 +2,14 @@
 
 It started as a personal  project to improve battery life and then Debloating some other MI phones.
 The results were outstanding.
-> Better battery life
-> No ads
-> Improved workflow
-> Better control
+
+Better battery life
+
+No ads
+
+Improved workflow
+
+Better control
 
 ### MiUi Warning : Turn off Find Device
 
