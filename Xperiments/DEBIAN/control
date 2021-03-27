@@ -1,0 +1,12 @@
+Source: debloat
+Section: misc
+Priority: optional
+Maintainer: Kushagra Karira <kushagrakarira@gmail.com>
+Build-Depends: debhelper-compat (= 9)
+Homepage: https://kushagrakarira.github.io/Debloat/
+Package: debloat
+Version: 210301
+Architecture: all
+Depends: adb,
+		fastboot
+Description: Remove that bloat and make your device faster
