@@ -1,3 +1,5 @@
+# Deblot
+<img src=https://img.shields.io/badge/licence-GPL3-blue>
 ## How to use :
 
 - 1. Download the repo. or clone it in your machine
