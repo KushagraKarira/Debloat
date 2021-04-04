@@ -1,7 +1,8 @@
 # Deblot
 ![IMG](https://img.shields.io/badge/licence-GPL3-blue?style=for-the-badge)
-![IMG](https://img.shields.io/tokei/lines/github/kushagrakarira/Debloat?style=for-the-badge)
-![IMG](https://img.shields.io/github/stars/kushagrakarira/Debloat?style=for-the-badge)
+![IMG](https://img.shields.io/github/stars/kushagrakarira/Debloat?style=for-the-badge&logo=github)
+![IMG](https://img.shields.io/tokei/lines/github/kushagrakarira/Debloat?style=for-the-badge&logo=github)
+![IMG](https://img.shields.io/github/repo-size/kushagrakarira/Debloat?label=SIZE&logo=github&style=for-the-badge)
 
 ## How to use :
 
@@ -16,3 +17,6 @@
 
 ## Screenshots
 <img src=HomeScreen.png width=40% height=40% align: left>
+
+## Contributors
+![GitHub Contributors Image](https://contrib.rocks/image?repo=kushagrakarira/Debloat)
