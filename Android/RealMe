@@ -1,8 +1,4 @@
 #!/bin/sh
-sudo apt install adb fastboot
-
-# Realme UI pre-installed apps #
-# adb shell pm uninstall --user 0 
 
 adb shell pm uninstall --user 0 com.google.android.setupwizard #Android Setup
 adb shell pm uninstall --user 0 com.os.docvault #DocVault

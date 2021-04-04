@@ -1,3 +1,4 @@
+#!/bin/sh
 ########################  T-Mobile ########################
 adb shell pm uninstall --user 0 com.mobitv.client.tmobiletvhd # T-Mobile TV (discontinued, replaced by nl.tmobiletv.vinson) provided by mobitv (https://en.wikipedia.org/wiki/MobiTV)
 adb shell pm uninstall --user 0 com.tmobile.pr.adap # Diagnostic tool. 

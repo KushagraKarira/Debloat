@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 adb shell pm uninstall --user 0 com.android.keyguard #Huwei Magazine Unlock
 adb shell pm uninstall --user 0 com.android.hwmirror #Mirror
 adb shell pm uninstall --user 0 com.baidu.input_huawei #Keyboard ( and spyware )
