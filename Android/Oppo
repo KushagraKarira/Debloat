@@ -1,4 +1,8 @@
 #!/bin/sh
+# ColorOS
+adb shell pm uninstall --user 0 com.coloros.compass2 # Compass App
+adb shell pm uninstall --user 0 com.coloros.video # Video App
+adb shell pm uninstall --user 0 com.coloros.gallery3d # Photos App
 adb shell pm uninstall --user 0 com.coloros.appmanager
 adb shell pm uninstall --user 0 com.coloros.assistantscreen # [MORE INFO NEEDED]
 adb shell pm uninstall --user 0 com.coloros.backuprestore # Most likely Oppo backup/restore feature 
