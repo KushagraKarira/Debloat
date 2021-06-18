@@ -136,3 +136,6 @@ adb shell pm uninstall --user 0 com.hmdglobal.support # My Phone (https://play.g
 #adb shell pm uninstall --user 0 com.evenwell.hdrservice # HDR Service (https://play.google.com/store/apps/details?id=adb shell pm uninstall --user 0 com.evenwell.hdrservice)
 #adb shell pm uninstall --user 0 com.evenwell.OTAUpdate # [MORE INFO NEEDED]
 #adb shell pm uninstall --user 0 com.evenwell.OTAUpdate.overlay.base.s600ww # Related to OTA Update (Over-The-Air updates, updates from Nokia)
+#com.evenwell.whitebalance
+#com.evenwell.whitebalance.overlay.base
+#com.hmdglobal.enterprise.api

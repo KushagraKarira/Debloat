@@ -82,3 +82,6 @@ adb shell pm uninstall --user 0 com.sonymobile.xperiaweather # Sony weather app 
 #adb shell pm uninstall --user 0 com.sonymobile.android.contacts # Sony contacts
 # adb shell pm uninstall --user 0 com.sonymobile.home
 # adb shell pm uninstall --user 0 com.sonymobile.launcher # Sony launcher
+#com.sonymobile.devicesecurity.service
+#com.sonymobile.home.product.res.overlay
+#com.sonymobile.swiqisystemservice

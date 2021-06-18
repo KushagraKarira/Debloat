@@ -4,12 +4,14 @@
 ![IMG](https://img.shields.io/tokei/lines/github/kushagrakarira/Debloat?style=for-the-badge&logo=github)
 ![IMG](https://img.shields.io/github/repo-size/kushagrakarira/Debloat?label=SIZE&logo=github&style=for-the-badge)
 
+Project Debloat provides essentials users need to remove unwanted or non useful software from their devices.
+
 ## How to use :
 
-1. [Download](https://github.com/KushagraKarira/Debloat/archive/refs/heads/master.zip) the repo. or clone it in your machine
-2. Find the script and Edit it as per your needs ( Comment out apps that you need )
-3. Save and Execute...
-4. Feedback !! - Seprate form has been created on issues page
+1. [Download](https://github.com/KushagraKarira/Debloat/archive/refs/heads/master.zip) the repo.
+2. (Optional) Review the script and comment out the applications that might be useful to you
+3. Execute the script
+4. Feedback !! - Open up new issues for BUGS and feature requests
 
 ## Caution
 ### Remember to backup your chats and photos
