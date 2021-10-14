@@ -8,10 +8,7 @@ Project Debloat provides essentials users need to remove unwanted or non useful 
 
 ## How to use :
 
-1. [Download](https://github.com/KushagraKarira/Debloat/archive/refs/heads/master.zip) the repo.
-2. (Optional) Review the script and comment out the applications that might be useful to you
-3. Execute the script
-4. Feedback !! - Open up new issues for BUGS and feature requests
+Run : 'wget https://github.com/KushagraKarira/Debloat/archive/refs/heads/master.zip && unzip master.zip && cd Debloat-master && chmod +x Android.sh && ./Android.sh'
 
 ## Caution
 ### Remember to backup your chats and photos
