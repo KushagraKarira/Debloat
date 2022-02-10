@@ -1,0 +1,17 @@
+#!/bin/sh
+#List for Jio STB and not for jio phones
+adb shell pm uninstall --user 0 com.communitake.remotecontrolservice
+adb shell pm uninstall --user 0 com.sdmc.factorymonitor (only for c200)
+adb shell pm uninstall --user 0 com.sdmc.readedid (only for c200)
+adb shell pm uninstall --user 0 com.iwedia.pvodupdateservice
+adb shell pm uninstall --user 0 com.jio.stbremotecare.ril
+adb shell pm uninstall --user 0 com.iwedia.updatercuotaservice
+adb shell pm uninstall --user 0 com.jio.stbadservice
+#adb shell pm uninstall --user 0 com.rjil.jiostbsetting #Jio settings
+#adb shell pm uninstall --user 0 com.iwedia.ui.rjio.launcher.reliance #Jio launcher
+adb shell pm uninstall --user 0 com.rjil.jiostblogservice
+adb shell pm uninstall --user 0 com.iwedia.fti.rjio.fti.reliance
+adb shell pm uninstall --user 0 com.jio.stb.tifextn
+adb shell pm uninstall --user 0 insight.tr069.client
+adb shell pm uninstall --user 0 com.android.managedprovisioning
+adb shell pm uninstall --user 0 com.iwedia.httpupdate
