@@ -1,0 +1,18 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<!DOCTYPE cambalache-project SYSTEM "cambalache-project.dtd">
+<cambalache-project version="0.8.2" target_tk="gtk-4.0">
+  <ui>
+	(1,None,"debloat.ui","debloat.ui",None,None,None,None,None,None)
+  </ui>
+  <object>
+	(1,1,"GtkWindow",None,None,None,None,None,None),
+	(1,2,"GtkBox",None,1,None,None,None,-1),
+	(1,3,"GtkButton",None,2,None,None,None,1),
+	(1,4,"GtkButton",None,2,None,None,None,2),
+	(1,5,"GtkTextView",None,2,None,None,None,None)
+  </object>
+  <object_property>
+	(1,3,"GtkButton","label","Remove",None,None,None,None),
+	(1,4,"GtkButton","label","Keep",None,None,None,None)
+  </object_property>
+</cambalache-project>
