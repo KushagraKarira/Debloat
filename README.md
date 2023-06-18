@@ -16,6 +16,7 @@ Run : 'wget https://github.com/KushagraKarira/Debloat/archive/refs/heads/master.
 
 ## Screenshots
 <img src=HomeScreen.png width=40% height=40% align: left>
+<img src=Launcher.jpg width=40% height=40% align: left>
 
 ## Contributors
 ![GitHub Contributors Image](https://contrib.rocks/image?repo=kushagrakarira/Debloat)
