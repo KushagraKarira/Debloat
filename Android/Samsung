@@ -1,5 +1,13 @@
 #!/bin/sh
-adb shell pm uninstall --user 0 com.samsung.android.messaging
+adb shell pm uninstall --user 0 com.samsung.android.messaging //Samsung Message
+adb shell pm uninstall --user 0 com.microsoft.appmanager //Windows Link
+adb shell pm uninstall --user 0 com.samsung.ecomm.global.in
+adb shell pm uninstall --user 0 com.mygalaxy
+adb shell pm uninstall --user 0 com.sec.android.easyMover //
+adb shell pm uninstall --user 0 com.microsoft.skydrive //OneDrive
+adb shell pm uninstall --user 0 com.opera.max.oem //VPN
+adb shell pm uninstall --user 0 com.samsung.ecomm.global.in //
+adb shell pm uninstall --user 0 com.sec.android.app.samsungapps
 adb shell pm uninstall --user 0 com.sec.android.inputmethod
 adb shell pm uninstall --user 0 com.sec.android.app.myfiles
 adb shell pm uninstall --user 0 com.sec.android.app.sbrowser
