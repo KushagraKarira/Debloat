@@ -8,7 +8,7 @@ Project Debloat provides essentials users need to remove unwanted or non useful 
 
 ## How to use :
 
-Run : 'wget https://github.com/KushagraKarira/Debloat/archive/refs/heads/master.zip && unzip master.zip && cd Debloat-master && chmod +x Android.sh && ./Android.sh'
+Run : 'wget https://github.com/KushagraKarira/Debloat/archive/refs/heads/master.zip && unzip master.zip && cd Debloat-master && chmod +x Debloat.sh && ./Debloat.sh'
 
 ## Caution
 ### Remember to backup your chats and photos
