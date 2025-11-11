@@ -27,6 +27,10 @@ typedef struct {
 // Global state instance
 static AppState *app_state = NULL;
 
+// --- FUNCTION PROTOTYPES (to fix the implicit declaration errors) ---
+static void update_app_list(AppState *state);
+static void update_action_bar_visibility(AppState *state);
+
 
 // --- HELPER FUNCTIONS ---
 
@@ -93,10 +97,7 @@ static void on_device_selected(GtkListBox *list_box, GtkListBoxRow *row, AppStat
 
     g_print("Device selected: %s\n", state->selected_device_id);
 
-    // Clear and load app list for the new device
-    // In a real app, this would run "adb -s <id> shell pm list packages -3"
-    // We will use a mock function for simplicity here.
-    void update_app_list(AppState *state);
+    // Load app list for the new device
     update_app_list(state);
 }
 
@@ -131,8 +132,6 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
     g_print("Attempting to debloat %d apps on device %s: %s\n", count, state->selected_device_id, selected_packages_str);
 
     // 2. RUN ADB COMMANDS (synchronous execution for simplicity - use GSubprocess for real app)
-    // NOTE: In a real GTK app, blocking the main thread with g_spawn_sync() is bad practice.
-    // Use GSubprocess or g_spawn_async_with_pipes() and handle output/errors asynchronously.
 
     gtk_widget_set_sensitive(state->debloat_button, FALSE);
     gtk_label_set_text(GTK_LABEL(state->status_label), "Debloating... Please wait (UI will block momentarily).");
@@ -140,65 +139,44 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
 
     gint success_count = 0;
     gint failure_count = 0;
+    GList *items_to_remove = NULL;
 
-    for (l = state->app_list; l != NULL; l = l->next) {
-        AppItem *item = (AppItem *)l->data;
+
+    GList *current_l = state->app_list;
+    while (current_l != NULL) {
+        AppItem *item = (AppItem *)current_l->data;
+        GList *next_l = current_l->next; // Save next pointer before possible removal
+
         if (item->is_selected) {
-            gchar *stdout_buf = NULL;
-            gchar *stderr_buf = NULL;
-            gint status = -1;
-            GError *error = NULL;
-
-            // ADB command template (simulated or simplified for example)
-            // Real Command: adb -s <device_id> shell pm uninstall -k --user 0 <package_name>
-            gchar *argv[] = { 
-                "adb", 
-                // "-s", state->selected_device_id, // Uncomment for specific device targeting
-                "shell", 
-                "pm", 
-                "uninstall", 
-                "-k", 
-                "--user", 
-                "0", 
-                item->package_name, 
-                NULL 
-            };
-
             // SIMULATED COMMAND SUCCESS/FAILURE
-            // For a minimal working example, we'll simulate the result
             if (g_str_has_prefix(item->package_name, "com.mock.fail")) {
                 failure_count++;
                 g_print("Simulated Failure for: %s\n", item->package_name);
             } else {
                 success_count++;
                 g_print("Simulated Success for: %s\n", item->package_name);
-            }
-            
-            // This is the actual synchronous execution call (commented out to avoid real adb dependency)
-            /*
-            if (g_spawn_sync(NULL, argv, NULL, G_SPAWN_SEARCH_PATH, NULL, NULL, &stdout_buf, &stderr_buf, &status, &error)) {
-                if (status == 0 && stdout_buf && g_str_has_prefix(stdout_buf, "Success")) {
-                    success_count++;
-                } else {
-                    failure_count++;
-                }
-            } else {
-                g_warning("Failed to run ADB for %s: %s\n", item->package_name, error->message);
-                g_clear_error(&error);
-                failure_count++;
-            }
-            g_free(stdout_buf);
-            g_free(stderr_buf);
-            */
-            
-            // Remove the package from the UI upon success (or simulated success)
-            if (success_count > 0 && failure_count == 0) { // Simple check to remove immediately
+
+                // Add item to list for removal
+                items_to_remove = g_list_append(items_to_remove, item);
+                
+                // Remove the row from the ListBox immediately
                 gtk_list_box_remove(GTK_LIST_BOX(state->app_list_box), item->row);
             }
         }
+        current_l = next_l; // Move to the next item
     }
 
-    // 3. Update status and reset selection
+    // 3. Remove successful items from the internal app_list state
+    GList *remove_l;
+    for (remove_l = items_to_remove; remove_l != NULL; remove_l = remove_l->next) {
+        AppItem *item = (AppItem *)remove_l->data;
+        state->app_list = g_list_remove(state->app_list, item);
+        app_item_free(item);
+    }
+    g_list_free(items_to_remove);
+
+
+    // 4. Update status and reset selection
     gchar *result_msg = g_strdup_printf(
         "Debloat process complete. Success: %d, Failures: %d.", 
         success_count, 
@@ -208,15 +186,6 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
     g_free(result_msg);
     g_free(selected_packages_str);
 
-    // Clear the selection state in the remaining list items
-    GList *current_l;
-    for (current_l = state->app_list; current_l != NULL; current_l = current_l->next) {
-        AppItem *item = (AppItem *)current_l->data;
-        if (item->is_selected) {
-            item->is_selected = FALSE;
-        }
-    }
-    
     // Refresh UI state
     gtk_widget_set_sensitive(state->debloat_button, TRUE);
     update_action_bar_visibility(state);
@@ -227,16 +196,15 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
 
 /**
  * @brief Populates the Device List with mock data.
- * In a real app, this would run 'adb devices' and parse the output.
+ * Fix: Use modern GTK4 method to clear the list box.
  */
 static void update_device_list(AppState *state) {
-    // Clear existing list
-    GList *children, *l;
-    children = gtk_widget_get_children(state->device_list_box);
-    for (l = children; l != NULL; l = l->next) {
-        gtk_list_box_remove(GTK_LIST_BOX(state->device_list_box), GTK_WIDGET(l->data));
+    // Clear existing list (GTK4 method)
+    GtkListBoxRow *row;
+    while ((row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(state->device_list_box), 0))) {
+        gtk_list_box_remove(GTK_LIST_BOX(state->device_list_box), GTK_WIDGET(row));
     }
-    g_list_free(children);
+
 
     // MOCK DEVICES - Replace with real ADB parsing logic
     const gchar *mock_devices[] = {
@@ -256,20 +224,20 @@ static void update_device_list(AppState *state) {
     GtkListBoxRow *first_row = NULL;
 
     for (int i = 0; mock_devices[i] != NULL; i++) {
-        GtkWidget *row = gtk_list_box_row_new();
+        GtkWidget *row_widget = gtk_list_box_row_new();
         GtkWidget *label = gtk_label_new(mock_devices[i]);
         gtk_label_set_xalign(GTK_LABEL(label), 0.0); // Align left
         gtk_widget_set_margin_start(label, 10);
         gtk_widget_set_margin_end(label, 10);
-        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), label);
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row_widget), label);
 
         // Store the device ID in the row's object data
-        g_object_set_data(G_OBJECT(row), "device-id", g_strdup(mock_ids[i]));
+        g_object_set_data(G_OBJECT(row_widget), "device-id", g_strdup(mock_ids[i]));
 
-        gtk_list_box_append(GTK_LIST_BOX(state->device_list_box), row);
+        gtk_list_box_append(GTK_LIST_BOX(state->device_list_box), row_widget);
 
         if (!first_row) {
-            first_row = GTK_LIST_BOX_ROW(row);
+            first_row = GTK_LIST_BOX_ROW(row_widget);
         }
     }
 
@@ -283,16 +251,14 @@ static void update_device_list(AppState *state) {
 
 /**
  * @brief Populates the App List with packages for the selected device.
- * In a real app, this would run 'adb shell pm list packages -3' and parse.
+ * Fix: Use modern GTK4 method to clear the list box.
  */
 static void update_app_list(AppState *state) {
-    // Clear existing app list
-    GList *children, *l;
-    children = gtk_widget_get_children(state->app_list_box);
-    for (l = children; l != NULL; l = l->next) {
-        gtk_list_box_remove(GTK_LIST_BOX(state->app_list_box), GTK_WIDGET(l->data));
+    // Clear existing app list (GTK4 method)
+    GtkListBoxRow *row;
+    while ((row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(state->app_list_box), 0))) {
+        gtk_list_box_remove(GTK_LIST_BOX(state->app_list_box), GTK_WIDGET(row));
     }
-    g_list_free(children);
 
     // Free internal state list
     g_list_free_full(state->app_list, (GDestroyNotify)app_item_free);
@@ -317,8 +283,8 @@ static void update_app_list(AppState *state) {
         item->package_name = g_strdup(mock_packages[i][1]);
         item->is_selected = FALSE;
 
-        GtkWidget *row = gtk_list_box_row_new();
-        GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+        GtkWidget *row_widget = gtk_list_box_row_new();
+        GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 15); // Increased spacing
 
         // Checkbox
         GtkWidget *check = gtk_check_button_new();
@@ -337,11 +303,11 @@ static void update_app_list(AppState *state) {
         gtk_box_append(GTK_BOX(vbox), package_label);
         gtk_box_append(GTK_BOX(hbox), vbox);
 
-        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), hbox);
-        gtk_list_box_append(GTK_LIST_BOX(state->app_list_box), row);
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row_widget), hbox);
+        gtk_list_box_append(GTK_LIST_BOX(state->app_list_box), row_widget);
 
         // Store reference and connect signal
-        item->row = row;
+        item->row = row_widget;
         g_signal_connect(check, "toggled", G_CALLBACK(on_app_toggled), item);
 
         state->app_list = g_list_append(state->app_list, item);
@@ -376,9 +342,11 @@ static void activate(GtkApplication *app, AppState *state) {
     GtkWidget *device_header = gtk_label_new("Connected Devices");
     gtk_widget_add_css_class(device_header, "title-4");
     gtk_box_append(GTK_BOX(left_box), device_header);
+    gtk_widget_set_margin_top(device_header, 10);
 
     state->device_list_box = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->device_list_box), GTK_SELECTION_SINGLE);
+    // Note: We use row-activated instead of row-selected for clear, single-action behavior
     g_signal_connect(state->device_list_box, "row-activated", G_CALLBACK(on_device_selected), state);
 
     GtkWidget *device_scrolled = gtk_scrolled_window_new();
@@ -389,7 +357,7 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_widget_set_vexpand(state->device_list_box, TRUE);
 
     gtk_paned_set_start_child(GTK_PANED(paned), left_box);
-    gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE); // Device list width fixed to 20% by default
+    gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE); 
     gtk_paned_set_shrink_start_child(GTK_PANED(paned), FALSE);
 
     gtk_box_append(GTK_BOX(left_box), device_scrolled);
@@ -400,6 +368,7 @@ static void activate(GtkApplication *app, AppState *state) {
     GtkWidget *app_header = gtk_label_new("Installed User/System Apps");
     gtk_widget_add_css_class(app_header, "title-4");
     gtk_box_append(GTK_BOX(right_vbox), app_header);
+    gtk_widget_set_margin_top(app_header, 10);
     
     state->app_list_box = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->app_list_box), GTK_SELECTION_NONE);
