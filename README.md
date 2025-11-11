@@ -1,22 +1,35 @@
-# Deblot
 ![IMG](https://img.shields.io/badge/licence-GPL3-blue?style=for-the-badge)
 ![IMG](https://img.shields.io/github/stars/kushagrakarira/Debloat?style=for-the-badge&logo=github)
-![IMG](https://img.shields.io/tokei/lines/github/kushagrakarira/Debloat?style=for-the-badge&logo=github)
 ![IMG](https://img.shields.io/github/repo-size/kushagrakarira/Debloat?label=SIZE&logo=github&style=for-the-badge)
 
-Project Debloat provides essentials users need to remove unwanted or non useful software from their devices.
+# Debloter for Android
+Take control of your phone, free up storage, memory and remove spyware and malware from your device.
 
 ## How to use :
 
-Run : 'wget https://github.com/KushagraKarira/Debloat/archive/refs/heads/master.zip && unzip master.zip && cd Debloat-master && chmod +x Android.sh && ./Android.sh'
+```sh
+wget https://github.com/KushagraKarira/Debloat/archive/refs/heads/master.zip && unzip master.zip && cd Debloat-master && chmod +x Android.sh && ./Android.sh'
+```
 
-## Caution
-### Remember to backup your chats and photos
-### In case of an accident go to [ApkMirror.com](https://www.apkmirror.com/) and help yourself
+## BETA testing
+./GTK4/debloater for a GUI interface.
+Been a long due, feel free to open issues for suggestions.
+
+### ToDo
+- [x] GUI Version
+- [ ] Add more devices and apps
+- [ ] Github Automated Release
+- [ ] Appimage
+- [ ] MacOS and Windows support
+- [ ] UNDO changes
+- [ ] Search and Install apps
 
 ## Screenshots
-<img src=HomeScreen.png width=40% height=40% align: left>
-<img src=Launcher.jpg width=40% height=40% align: left>
+<img src=Screenshot.png>
+
+> [!WARNING]
+> Function of many OEM apps are unknown and are added here based on userr response from the internet.
+> No contributor may be held liable for the loss of data from using this application.
 
 ## Contributors
 ![GitHub Contributors Image](https://contrib.rocks/image?repo=kushagrakarira/Debloat)
