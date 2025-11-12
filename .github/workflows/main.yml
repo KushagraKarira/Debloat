@@ -1,0 +1,35 @@
+name: Build GTK4 App
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Get the code from the repository
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 2. Install GTK4 development libraries and GCC compiler
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-4-dev gcc pkg-config
+
+    # 3. Compile the code
+    # Adjust 'GTK4/app.c' if your file is in a different folder
+    - name: Compile
+      run: |
+        gcc -o debloater GTK4/app.c $(pkg-config --cflags --libs gtk4)
+
+    # 4. Save the executable so you can download it from GitHub Actions
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: debloat-app-linux
+        path: debloater
