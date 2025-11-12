@@ -1,0 +1,39 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for release (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+# Permission needed to create releases
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-4-dev gcc pkg-config
+
+    - name: Compile
+      run: |
+        gcc -o debloater GTK4/app.c $(pkg-config --cflags --libs gtk4)
+
+    - name: Create Release and Upload Asset
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ inputs.tag_name }}
+        files: debloater
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
