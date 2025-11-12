@@ -1,6 +1,7 @@
 #include <gtk/gtk.h>
 #include <glib/glist.h>
 #include <gio/gio.h>
+#include <sys/wait.h> // Required for WEXITSTATUS
 
 // --- STRUCTS AND DATA MANAGEMENT ---
 
@@ -26,7 +27,7 @@ typedef struct {
     GtkWidget *action_bar;
     GtkWidget *debloat_button;
     GtkWidget *status_label;
-    GtkWidget *adb_debug_button; // New Button
+    GtkWidget *adb_debug_button; 
     gchar *selected_device_id;
     GList *app_list; // List of AppItem*
 } AppState;
@@ -39,7 +40,8 @@ static void update_app_list(AppState *state);
 static void update_action_bar_visibility(AppState *state);
 
 
-// --- PACKAGE DATA (Bloatware lists remain the same) ---
+// --- PACKAGE DATA (Bloatware lists) ---
+// Note: Mock Fail entries have been removed as we are now using real command execution.
 
 static const PackageEntry SAMSUNG_APPS[] = {
     {"Samsung Message", "com.samsung.android.messaging"},
@@ -55,8 +57,6 @@ static const PackageEntry SAMSUNG_APPS[] = {
     {"Facebook App Manager", "com.facebook.appmanager"},
     {"Game Home", "com.samsung.android.game.gamehome"},
     {"S Voice", "com.samsung.android.svoice"},
-    // Mock package to simulate a failure (e.g., package not found or permission denied)
-    {"Mock Fail (Example)", "com.mock.fail.thispackage"}, 
     {NULL, NULL} 
 };
 
@@ -70,10 +70,137 @@ static const PackageEntry XIAOMI_APPS[] = {
     {"Xiaomi Shop", "com.xiaomi.shop"},
     {"Xiaomi O2O", "com.xiaomi.o2o"},
     {"Xiaomi Pass", "com.xiaomi.pass"},
-    // Mock package to simulate a failure
-    {"Mock Fail (Example)", "com.mock.fail.thispackage"}, 
     {NULL, NULL} 
 };
+
+static const PackageEntry VIVO_APPS[] = {
+    {"Vivo Browser", "com.vivo.browser"},
+    {"Vivo App Store", "com.vivo.appstore"},
+    {"BBK Cloud", "com.bbk.cloud"},
+    {"Vivo Gallery", "com.vivo.gallery"},
+    {"Vivo Weather", "com.vivo.weather"},
+    {"Facebook System", "com.facebook.system"},
+    {"Vivo Easy Share", "com.vivo.easyshare"},
+    {"Vivo Hiboard", "com.vivo.hiboard"},
+    {"MTK Logger", "com.mediatek.mtklogger"},
+    {"Vivo Assistant", "com.vivo.assistant"},
+    {NULL, NULL} 
+};
+
+static const PackageEntry TCL_APPS[] = {
+    {"TCL Compass", "com.tcl.compass"},
+    {"Demo Page", "com.tcl.demopage"},
+    {"FM Radio", "com.tcl.fmradio"},
+    {"Face Unlock", "com.tct.faceunlock"},
+    {"Game Mode", "com.tct.gamemode"},
+    {"TCL Music", "com.tct.music"},
+    {"Privacy Mode", "com.tct.privacymode"},
+    {"Retail Demo", "com.tct.retaildemo"},
+    {"Smart Cloud", "com.tct.smart.cloud"},
+    {"Smart Drive Mode", "com.tct.smart.drivemode"},
+    {NULL, NULL} 
+};
+
+static const PackageEntry SONY_APPS[] = {
+    {"TV SideView Video", "com.sony.tvsideview.videoph"},
+    {"Creative effect", "com.sonyericsson.android.addoncamera.artfilter"},
+    {"Usage Stats", "com.sonyericsson.idd.agent"},
+    {"Backup/Restore", "com.sonyericsson.mtp.extension.backuprestore"},
+    {"Sony Music", "com.sonyericsson.music"},
+    {"Sony Themes", "com.sonymobile.themes.xperialoops2"},
+    {"Xperia Lounge", "com.sonymobile.xperialounge.services"},
+    {"Xperia Wallpaper", "com.sonymobile.xperiaxlivewallpaper"},
+    {"Xperia Transfer", "com.sonymobile.xperiatransfermobile"},
+    {"Sony Weather", "com.sonymobile.xperiaweather"},
+    {NULL, NULL} 
+};
+
+static const PackageEntry REALME_APPS[] = {
+    {"Android Setup", "com.google.android.setupwizard"},
+    {"DocVault", "com.os.docvault"},
+    {"HeyTap Cloud", "com.heytap.cloud"},
+    {"Music (Oppo)", "com.oppo.music"},
+    {"Video (ColorOS)", "com.coloros.video"},
+    {"Clone Phone", "com.coloros.backuprestore"},
+    {"Feedback Toolkit", "com.oppo.logkit"},
+    {"My Realme (User Center)", "com.heytap.usercenter"},
+    {"Opera News", "com.opera.branding.news"},
+    {"Play Movies & TV", "com.google.android.videos"},
+    {NULL, NULL} 
+};
+
+static const PackageEntry OPPO_APPS[] = {
+    {"Compass App", "com.coloros.compass2"},
+    {"Video App", "com.coloros.video"},
+    {"Photos App (Gallery)", "com.coloros.gallery3d"},
+    {"Oppo Cloud", "com.coloros.cloud"},
+    {"Find My Phone", "com.coloros.findmyphone"},
+    {"Game Space", "com.coloros.gamespace"},
+    {"Oppo App Market", "com.oppo.market"},
+    {"Oppo Music", "com.oppo.music"},
+    {"Oppo Wallet", "com.coloros.wallet"},
+    {"Find My Phone Client", "com.realme.findphone.client2"},
+    {NULL, NULL} 
+};
+
+static const PackageEntry ONEPLUS_APPS[] = {
+    {"Shot On OnePlus", "cn.oneplus.photos"},
+    {"OnePlus Switch (Backup)", "com.oneplus.backuprestore"},
+    {"Zen Mode", "com.oneplus.brickmode"},
+    {"Game Space", "com.oneplus.gamespace"},
+    {"Health Check", "com.oneplus.healthcheck"},
+    {"Community Forum", "net.oneplus.forums"},
+    {"Cricket Scores", "net.oneplus.opsports"},
+    {"OnePlus Weather", "net.oneplus.weather"},
+    {"OnePlus Widget", "net.oneplus.widget"},
+    {NULL, NULL} 
+};
+
+static const PackageEntry NOKIA_APPS[] = {
+    {"Data Go", "com.hmdglobal.datago"},
+    {"My Phone Support", "com.hmdglobal.support"},
+    {"APR Upload Service", "com.evenwell.AprUploadService"},
+    {"Power Saving", "com.evenwell.PowerSaving"},
+    {"Smart Switch", "com.evenwell.smartswitch"},
+    {"Traffic Monitor", "com.evenwell.trafficmonitor"},
+    {"Weather App", "com.evenwell.Weather"},
+    {"Weather Widget", "com.evenwell.weather.widget"},
+    {NULL, NULL} 
+};
+
+static const PackageEntry MOTOROLA_APPS[] = {
+    {"Lenovo ID", "com.lenovo.lsf.user"},
+    {"Rescue Security", "com.lmi.motorola.rescuesecurity"},
+    {"FM Radio", "com.motorola.android.fmradio"},
+    {"OMA Provisioning", "com.motorola.android.provisioning"},
+    {"Face Unlock Agent", "com.motorola.faceunlocktrustagent"},
+    {"Invisible Net", "com.motorola.invisiblenet"},
+    {"Motosignature", "com.motorola.motosignature.app"},
+    {"Carrier Provisioning", "com.motorola.omadm.service"},
+    {"System Package", "com.motorola.pgmsystem2"},
+    {"System Server", "com.motorola.systemserver"},
+    {NULL, NULL} 
+};
+
+static const PackageEntry ZTE_APPS[] = {
+    {"ZTE Voice Assistant", "com.zte.assistant"},
+    {"ZTE Weather", "com.zte.weather"},
+    {NULL, NULL} 
+};
+
+static const PackageEntry JIO_APPS[] = {
+    {"Remote Control Service", "com.communitake.remotecontrolservice"},
+    {"Factory Monitor (STB)", "com.sdmc.factorymonitor"},
+    {"PVOD Update Service", "com.iwedia.pvodupdateservice"},
+    {"Remote Care RIL (STB)", "com.jio.stbremotecare.ril"},
+    {"STB Ad Service", "com.jio.stbadservice"},
+    {"Log Service (STB)", "com.rjil.jiostblogservice"},
+    {"TIF Extn (STB)", "com.jio.stb.tifextn"},
+    {"TR069 Client", "insight.tr069.client"},
+    {"Managed Provisioning", "com.android.managedprovisioning"},
+    {NULL, NULL} 
+};
+
 
 // --- HELPER FUNCTIONS ---
 
@@ -100,13 +227,20 @@ static void update_action_bar_visibility(AppState *state) {
         }
     }
 
-    if (selected_count > 0 && state->selected_device_id) {
+    if (selected_count > 0 && state->selected_device_id && g_strcmp0(state->selected_device_id, "ADB_DEBUG") != 0) {
         gtk_widget_set_visible(state->action_bar, TRUE);
-        gchar *label_text = g_strdup_printf("Ready to debloat %d app(s) on device '%s'.", selected_count, state->selected_device_id);
+        gchar *label_text = g_strdup_printf("Ready to debloat %d app(s) on device category '%s'.", selected_count, state->selected_device_id);
         gtk_label_set_text(GTK_LABEL(state->status_label), label_text);
         g_free(label_text);
         gtk_widget_set_sensitive(state->debloat_button, TRUE);
-    } else {
+    } else if (selected_count > 0 && g_strcmp0(state->selected_device_id, "ADB_DEBUG") == 0) {
+        gtk_widget_set_visible(state->action_bar, TRUE);
+        gchar *label_text = g_strdup_printf("Ready to debloat %d app(s) on connected device '%s'.", selected_count, state->selected_device_id);
+        gtk_label_set_text(GTK_LABEL(state->status_label), label_text);
+        g_free(label_text);
+        gtk_widget_set_sensitive(state->debloat_button, TRUE);
+    } 
+    else {
         gtk_widget_set_visible(state->action_bar, FALSE);
     }
 }
@@ -119,12 +253,12 @@ static void update_action_bar_visibility(AppState *state) {
 static void on_about_clicked(GtkButton *button, GtkApplicationWindow *parent) {
     GtkWidget *dialog = gtk_about_dialog_new();
 
-    gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(dialog), "ADB Debloat Manager");
-    gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(dialog), "1.0");
+    gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(dialog), "Android Debloater");
+    gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(dialog), "0.6");
     gtk_about_dialog_set_copyright(GTK_ABOUT_DIALOG(dialog), "© 2025 Kushagra Karira");
     
     const gchar *comments[] = {
-        "A GTK4 application for debloating Android devices using ADB.",
+        "A GTK4 application for debloating Android devices using ADB. Requires ADB installed and a connected device.",
         NULL
     };
     gtk_about_dialog_set_comments(GTK_ABOUT_DIALOG(dialog), comments[0]);
@@ -166,10 +300,15 @@ static void on_device_selected(GtkListBox *list_box, GtkListBoxRow *row, AppStat
     const gchar *device_id_data = g_object_get_data(G_OBJECT(row), "device-id");
     if (!device_id_data) return;
 
-    if (state->selected_device_id) {
-        g_free(state->selected_device_id);
+    // Only update selected_device_id if it's the ADB_DEBUG option
+    if (g_strcmp0(device_id_data, "ADB_DEBUG") == 0) {
+        if (state->selected_device_id) g_free(state->selected_device_id);
+        state->selected_device_id = g_strdup("ADB_DEBUG");
+    } else {
+        // For manufacturer selection, we use the manufacturer name as the device ID mock
+        if (state->selected_device_id) g_free(state->selected_device_id);
+        state->selected_device_id = g_strdup(device_id_data);
     }
-    state->selected_device_id = g_strdup(device_id_data);
 
     g_print("Device category selected: %s\n", state->selected_device_id);
     
@@ -182,15 +321,15 @@ static void on_device_selected(GtkListBox *list_box, GtkListBoxRow *row, AppStat
 }
 
 /**
- * @brief Handler for the ADB Debug button click. Simulates finding a device.
+ * @brief Handler for the ADB Debug button click. Simulates finding and connecting to a device.
  */
 static void on_adb_debug_clicked(GtkButton *button, AppState *state) {
-    // 1. Simulate ADB command execution
+    // 1. Simulate ADB command execution to find a device
     g_print("Executing: adb devices\n");
-    g_usleep(500000); // Wait 0.5 sec
 
     // 2. Simulate finding a device ID
-    const gchar *real_device_id = "XYZ123ABC_REAL";
+    // In a real app, this would be retrieved from the adb output. Here, we use a placeholder.
+    const gchar *real_device_id = "REAL_DEVICE_ID"; 
     g_print("ADB Result: Device found: %s\n", real_device_id);
 
     // 3. Update the selected device ID to the "real" device ID
@@ -200,15 +339,30 @@ static void on_adb_debug_clicked(GtkButton *button, AppState *state) {
     state->selected_device_id = g_strdup(real_device_id);
     
     // 4. Update status message
-    gchar *status_msg = g_strdup_printf("ADB Debug: Found and connected to device ID: %s.", real_device_id);
+    gchar *status_msg = g_strdup_printf("ADB Debug: Found and connected to device ID: %s. Selecting Samsung's bloatware list to debloat on this device.", real_device_id);
     gtk_label_set_text(GTK_LABEL(state->status_label), status_msg);
     g_free(status_msg);
 
-    // 5. Update the list to reflect the chosen device category
-    GtkListBoxRow *selected_row = gtk_list_box_get_selected_row(GTK_LIST_BOX(state->device_list_box));
-    if (selected_row) {
-         // The list box handler will reload the app list based on the last selected row category (Samsung/Xiaomi)
-        on_device_selected(GTK_LIST_BOX(state->device_list_box), selected_row, state);
+    // 5. Select the Samsung mock row and reload apps
+    GtkListBoxRow *samsung_row = NULL;
+    GtkListBox *list_box = GTK_LIST_BOX(state->device_list_box);
+    int i = 0;
+    // Iterate through list box rows using gtk_list_box_get_row_at_index
+    while (TRUE) {
+        GtkListBoxRow *row = gtk_list_box_get_row_at_index(list_box, i++);
+        if (!row) break; 
+        
+        const gchar *device_id_data = g_object_get_data(G_OBJECT(row), "device-id");
+        if (device_id_data && g_strcmp0(device_id_data, "Samsung") == 0) {
+            samsung_row = row;
+            break;
+        }
+    }
+
+    if (samsung_row) {
+        gtk_list_box_select_row(GTK_LIST_BOX(state->device_list_box), samsung_row);
+        // Manually call the selection handler to load the packages for 'Samsung'
+        on_device_selected(GTK_LIST_BOX(state->device_list_box), samsung_row, state);
     }
     
     // Ensure the action bar visibility is correct based on new state
@@ -217,16 +371,17 @@ static void on_adb_debug_clicked(GtkButton *button, AppState *state) {
 
 
 /**
- * @brief Handler for the Debloat button click. Simulates the actual uninstall command.
+ * @brief Handler for the Debloat button click. Executes the actual ADB uninstall command.
  */
 static void on_debloat_clicked(GtkButton *button, AppState *state) {
     gint count = 0;
     gint success_count = 0;
     gint failure_count = 0;
     GList *items_to_remove = NULL;
+    gboolean error_in_adb_path = FALSE;
 
     gtk_widget_set_sensitive(state->debloat_button, FALSE);
-    gtk_label_set_text(GTK_LABEL(state->status_label), "Starting debloat process...");
+    gtk_label_set_text(GTK_LABEL(state->status_label), "Starting real ADB debloat process...");
 
     GList *current_l = state->app_list;
     while (current_l != NULL) {
@@ -235,29 +390,85 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
 
         if (item->is_selected) {
             count++;
-            
-            // --- SIMULATED ADB UNINSTALL ---
-            // Real command: adb shell pm uninstall --user 0 <package_name>
+
+            gchar *stdout_str = NULL;
+            gchar *stderr_str = NULL;
+            gint exit_status;
+            gboolean spawn_success;
+            GError *error = NULL;
+            gboolean uninstall_successful = FALSE;
+
+            // Construct the command arguments array
+            gchar *cmd_args[] = {
+                "adb",
+                "-s", state->selected_device_id, // Use the device ID
+                "shell", 
+                "pm", 
+                "uninstall", 
+                "--user", 
+                "0", 
+                item->package_name,
+                NULL
+            };
+
             g_print("\n--- Running Uninstall Command ---\n");
-            g_print("Target Device: %s\n", state->selected_device_id);
             g_print("Executing: adb -s %s shell pm uninstall --user 0 %s\n", 
-                    state->selected_device_id, item->package_name);
-            g_usleep(100000); // Simulate network/device delay
+                        state->selected_device_id, item->package_name);
+            
+            // Execute the command using g_spawn_sync
+            spawn_success = g_spawn_sync(
+                NULL,            // working_directory
+                cmd_args,        // argv
+                NULL,            // envp
+                G_SPAWN_SEARCH_PATH, // flags: search for 'adb' in PATH
+                NULL,            // child_setup
+                NULL,            // user_data
+                &stdout_str,     // standard output
+                &stderr_str,     // standard error
+                &exit_status,    // exit status
+                &error           // error
+            );
 
-            if (g_strcmp0(item->package_name, "com.mock.fail.thispackage") == 0) {
-                // Simulate failure output
-                g_print("ADB Output: Failure [DELETE_FAILED_INTERNAL_ERROR]\n");
+            if (error) {
+                // This usually means ADB could not be found or executed (e.g., path issue, permissions)
+                g_printerr("ADB Execution Error for package %s: %s\n", item->package_name, error->message);
+                g_error_free(error);
                 failure_count++;
+                error_in_adb_path = TRUE;
+            } else if (!spawn_success) {
+                 // Should be covered by the error block, but included for completeness
+                 g_printerr("ADB Command failed to start for package %s.\n", item->package_name);
+                 failure_count++;
             } else {
-                // Simulate success output
-                g_print("ADB Output: Success\n");
-                success_count++;
-
-                // Mark for UI removal
-                items_to_remove = g_list_append(items_to_remove, item);
-                gtk_list_box_remove(GTK_LIST_BOX(state->app_list_box), item->row);
+                // Command ran successfully, check the output for ADB result
+                // FIX: Use g_strstrip (lowercase s) to clean output
+                gchar *stripped_output = stdout_str ? g_strstrip(stdout_str) : NULL;
+                
+                if (stripped_output && g_str_has_prefix(stripped_output, "Success")) {
+                    uninstall_successful = TRUE;
+                    g_print("ADB Output: Success\n");
+                } else if (stripped_output && g_str_has_prefix(stripped_output, "Failure")) {
+                    // ADB reports Failure for various reasons (e.g., package not found, protected package)
+                    g_print("ADB Output: Failure (Stdout: %s)\n", stripped_output);
+                } else if (WEXITSTATUS(exit_status) != 0) {
+                    // Non-zero exit status (e.g., device offline)
+                    g_print("ADB Command Failed (Exit: %d). Stderr: %s\n", WEXITSTATUS(exit_status), stderr_str ? stderr_str : "None");
+                }
+                
+                if (uninstall_successful) {
+                    success_count++;
+                    // Mark for UI removal and cleanup
+                    items_to_remove = g_list_append(items_to_remove, item);
+                    gtk_list_box_remove(GTK_LIST_BOX(state->app_list_box), item->row);
+                } else {
+                    failure_count++;
+                }
             }
+
+            g_free(stdout_str);
+            g_free(stderr_str);
             g_print("---------------------------------\n");
+            if (error_in_adb_path) break; // Stop if ADB execution failed globally
         }
         current_l = next_l; 
     }
@@ -273,11 +484,19 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
 
 
     // Update status and reset selection
-    gchar *result_msg = g_strdup_printf(
-        "Debloat complete: Success: %d, Failures: %d.", 
-        success_count, 
-        failure_count
-    );
+    gchar *result_msg;
+    if (error_in_adb_path) {
+        result_msg = g_strdup_printf(
+            "FATAL ERROR: Could not execute 'adb'. Check your system path and ensure ADB is installed and authorized."
+        );
+    } else {
+        result_msg = g_strdup_printf(
+            "Debloat complete: Success: %d, Failures: %d.", 
+            success_count, 
+            failure_count
+        );
+    }
+
     gtk_label_set_text(GTK_LABEL(state->status_label), result_msg);
     g_free(result_msg);
 
@@ -302,18 +521,36 @@ static void update_device_list(AppState *state) {
     const gchar *mock_devices[] = {
         "Samsung (Galaxy Devices)",
         "Xiaomi (Mi/Redmi Devices)",
-        "Real ADB Device (Simulated)", // New option for debugging
+        "OnePlus (Oxygen OS)",
+        "Oppo (ColorOS)",
+        "RealMe (ColorOS/RealMe UI)",
+        "Vivo (Funtouch OS)",
+        "Sony (Xperia Devices)",
+        "Motorola (Moto Devices)",
+        "Nokia (HMD Devices)",
+        "TCL (Alcatel/TCL Devices)",
+        "ZTE (Nubia/Axon Devices)",
+        "Jio (STB/Phone)",
         NULL
     };
 
     const gchar *mock_ids[] = {
         "Samsung",
         "Xiaomi",
-        "ADB_DEBUG", // A category ID for the new option
+        "OnePlus",
+        "Oppo",
+        "RealMe",
+        "Vivo",
+        "Sony",
+        "Motorola",
+        "Nokia",
+        "TCL",
+        "ZTE",
+        "Jio",
         NULL
     };
 
-    GtkListBoxRow *first_row = NULL;
+    GtkListBoxRow *initial_row = NULL;
 
     for (int i = 0; mock_devices[i] != NULL; i++) {
         GtkWidget *row_widget = gtk_list_box_row_new();
@@ -335,16 +572,17 @@ static void update_device_list(AppState *state) {
 
         gtk_list_box_append(GTK_LIST_BOX(state->device_list_box), row_widget);
 
-        if (!first_row) {
-            first_row = GTK_LIST_BOX_ROW(row_widget);
+        // Select the row corresponding to the initial state->selected_device_id
+        if (g_strcmp0(mock_ids[i], state->selected_device_id) == 0) {
+            initial_row = GTK_LIST_BOX_ROW(row_widget);
         }
     }
 
-    // Automatically select the first device
-    if (first_row) {
-        gtk_list_box_select_row(GTK_LIST_BOX(state->device_list_box), first_row);
+    // Automatically select the initial device
+    if (initial_row) {
+        gtk_list_box_select_row(GTK_LIST_BOX(state->device_list_box), initial_row);
         // Manually trigger the selection handler to load apps
-        on_device_selected(GTK_LIST_BOX(state->device_list_box), first_row, state);
+        on_device_selected(GTK_LIST_BOX(state->device_list_box), initial_row, state);
     }
 }
 
@@ -365,17 +603,39 @@ static void update_app_list(AppState *state) {
     GtkListBoxRow *selected_row = gtk_list_box_get_selected_row(GTK_LIST_BOX(state->device_list_box));
     const gchar *category_id = selected_row ? g_object_get_data(G_OBJECT(selected_row), "device-id") : NULL;
 
-    if (category_id && g_strcmp0(category_id, "Samsung") == 0) {
-        packages_to_load = SAMSUNG_APPS;
-    } else if (category_id && g_strcmp0(category_id, "Xiaomi") == 0) {
-        packages_to_load = XIAOMI_APPS;
-    } else if (category_id && g_strcmp0(category_id, "ADB_DEBUG") == 0) {
-        // For the debug option, default to a standard list (e.g., Samsung, or a simple mock list)
-        packages_to_load = SAMSUNG_APPS; 
-    } else {
+    if (category_id) {
+        if (g_strcmp0(category_id, "Samsung") == 0) {
+            packages_to_load = SAMSUNG_APPS;
+        } else if (g_strcmp0(category_id, "Xiaomi") == 0) {
+            packages_to_load = XIAOMI_APPS;
+        } else if (g_strcmp0(category_id, "Vivo") == 0) {
+            packages_to_load = VIVO_APPS;
+        } else if (g_strcmp0(category_id, "TCL") == 0) {
+            packages_to_load = TCL_APPS;
+        } else if (g_strcmp0(category_id, "Sony") == 0) {
+            packages_to_load = SONY_APPS;
+        } else if (g_strcmp0(category_id, "RealMe") == 0) {
+            packages_to_load = REALME_APPS;
+        } else if (g_strcmp0(category_id, "Oppo") == 0) {
+            packages_to_load = OPPO_APPS;
+        } else if (g_strcmp0(category_id, "OnePlus") == 0) {
+            packages_to_load = ONEPLUS_APPS;
+        } else if (g_strcmp0(category_id, "Nokia") == 0) {
+            packages_to_load = NOKIA_APPS;
+        } else if (g_strcmp0(category_id, "Motorola") == 0) {
+            packages_to_load = MOTOROLA_APPS;
+        } else if (g_strcmp0(category_id, "ZTE") == 0) {
+            packages_to_load = ZTE_APPS;
+        } else if (g_strcmp0(category_id, "Jio") == 0) {
+            packages_to_load = JIO_APPS;
+        }
+    }
+    
+    if (!packages_to_load) {
         gtk_label_set_text(GTK_LABEL(state->status_label), "Select a device category to view available bloatware.");
         return;
     }
+
 
     // Populate list box with the selected packages
     for (int i = 0; packages_to_load[i].display_name != NULL; i++) {
@@ -432,7 +692,7 @@ static void update_app_list(AppState *state) {
  */
 static void activate(GtkApplication *app, AppState *state) {
     // Initialize application state
-    state->selected_device_id = g_strdup("Samsung"); // Default to Samsung category
+    state->selected_device_id = g_strdup("Oppo"); 
     state->app_list = NULL;
 
     // Create main window
@@ -473,11 +733,10 @@ static void activate(GtkApplication *app, AppState *state) {
 
     gtk_box_append(GTK_BOX(left_box), device_scrolled);
 
-    // New: ADB Debug section
+    // ADB Debug section
     GtkWidget *adb_frame = gtk_frame_new("ADB Connection");
     GtkWidget *adb_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     
-    // FIX: Replaced gtk_widget_set_margin_all with GTK4 compliant functions
     gtk_widget_set_margin_start(adb_vbox, 10);
     gtk_widget_set_margin_end(adb_vbox, 10);
     gtk_widget_set_margin_top(adb_vbox, 10);
@@ -486,13 +745,12 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_frame_set_child(GTK_FRAME(adb_frame), adb_vbox);
     gtk_box_append(GTK_BOX(left_box), adb_frame);
 
-    // FIX: Replaced gtk_widget_set_margin_all with GTK4 compliant functions
     gtk_widget_set_margin_start(adb_frame, 10);
     gtk_widget_set_margin_end(adb_frame, 10);
     gtk_widget_set_margin_top(adb_frame, 10);
     gtk_widget_set_margin_bottom(adb_frame, 10);
 
-    state->adb_debug_button = gtk_button_new_with_label("Check & Select ADB Device");
+    state->adb_debug_button = gtk_button_new_with_label("Connect Real ADB Device");
     gtk_widget_add_css_class(state->adb_debug_button, "suggested-action");
     gtk_box_append(GTK_BOX(adb_vbox), state->adb_debug_button);
     g_signal_connect(state->adb_debug_button, "clicked", G_CALLBACK(on_adb_debug_clicked), state);
