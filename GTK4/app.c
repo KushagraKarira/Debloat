@@ -1,5 +1,5 @@
 #include <gtk/gtk.h>
-#include <glib.h>
+#include <glib/glist.h>
 #include <gio/gio.h>
 
 // --- STRUCTS AND DATA MANAGEMENT ---
@@ -476,10 +476,21 @@ static void activate(GtkApplication *app, AppState *state) {
     // New: ADB Debug section
     GtkWidget *adb_frame = gtk_frame_new("ADB Connection");
     GtkWidget *adb_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_widget_set_margin_all(adb_vbox, 10);
+    
+    // FIX: Replaced gtk_widget_set_margin_all with GTK4 compliant functions
+    gtk_widget_set_margin_start(adb_vbox, 10);
+    gtk_widget_set_margin_end(adb_vbox, 10);
+    gtk_widget_set_margin_top(adb_vbox, 10);
+    gtk_widget_set_margin_bottom(adb_vbox, 10);
+    
     gtk_frame_set_child(GTK_FRAME(adb_frame), adb_vbox);
     gtk_box_append(GTK_BOX(left_box), adb_frame);
-    gtk_widget_set_margin_all(adb_frame, 10);
+
+    // FIX: Replaced gtk_widget_set_margin_all with GTK4 compliant functions
+    gtk_widget_set_margin_start(adb_frame, 10);
+    gtk_widget_set_margin_end(adb_frame, 10);
+    gtk_widget_set_margin_top(adb_frame, 10);
+    gtk_widget_set_margin_bottom(adb_frame, 10);
 
     state->adb_debug_button = gtk_button_new_with_label("Check & Select ADB Device");
     gtk_widget_add_css_class(state->adb_debug_button, "suggested-action");
