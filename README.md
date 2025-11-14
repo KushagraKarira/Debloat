@@ -18,7 +18,7 @@ Been a long due, feel free to open issues for suggestions.
 ### ToDo
 - [x] GUI Version
 - [ ] Add more devices and apps
-- [ ] Github Automated Release
+- [x] Github Automated Release
 - [ ] Appimage
 - [ ] MacOS and Windows support
 - [ ] UNDO changes
