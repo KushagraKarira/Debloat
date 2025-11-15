@@ -1,56 +1,62 @@
 #include <gtk/gtk.h>
-#include <adwaita.h> // <-- ADD THIS
+#include <adwaita.h>
 #include <glib/glist.h>
 #include <gio/gio.h>
 #include <sys/wait.h> // Required for WEXITSTATUS
 
 // --- STRUCTS AND DATA MANAGEMENT ---
 
-// Structure for package definitions
+/**
+ * @brief Defines a single uninstallable package.
+ */
 typedef struct {
-    const gchar *display_name;
-    const gchar *package_name;
+    const gchar *display_name; // User-friendly name (e.g., "Mi Browser")
+    const gchar *package_name; // Technical name (e.g., "com.android.browser")
 } PackageEntry;
 
-// Structure to hold information about a single installed package instance
+/**
+ * @brief Tracks the state of a package in the UI.
+ */
 typedef struct {
     gchar *package_name;
     gchar *display_name;
-    gboolean is_selected;
-    GtkWidget *main_list_row; // Reference to the row in the main app list
-    GtkWidget *uninstalled_list_row; // Reference to the row in the uninstalled list
+    gboolean is_selected;             // Is the checkbox ticked?
+    GtkWidget *main_list_row;         // Reference to the row in the "Debloat" list
+    GtkWidget *uninstalled_list_row; // Reference to the row in the "Undo" list
 } AppItem;
 
-// Structure to hold global application state
+/**
+ * @brief Holds all global state for the application.
+ */
 typedef struct {
-    AdwApplicationWindow *window; // <-- CHANGED
-    GtkWidget *device_list_box;
-    GtkWidget *app_list_box;
-    GtkWidget *action_bar;
-    GtkWidget *debloat_button;
-    GtkWidget *status_label;
+    AdwApplicationWindow *window; // The main application window
+    GtkWidget *device_list_box;   // Left-side list of manufacturers
+    GtkWidget *app_list_box;      // Right-side list of apps to debloat
+    GtkWidget *action_bar;        // Bottom bar with "Remove" button
+    GtkWidget *debloat_button;    // The "Remove" button
+    GtkWidget *status_label;      // Label inside the action_bar
+
+    // ADB Device selection
+    GtkWidget *device_dropdown;     // Dropdown to select a connected device
+    GtkStringList *device_model;    // Data model for the device_dropdown
+    GtkWidget *device_status_label; // Label under the dropdown for feedback
+
+    // State variables
+    gchar *selected_device_id;        // The *real* serial of the selected device (e.g., "ABC12345")
+    gchar *selected_manufacturer_id;  // The *category* selected (e.g., "Samsung")
+    GList *app_list;                  // GList of AppItem* for the "Debloat" page
     
-    // New widgets for real ADB device selection
-    GtkWidget *device_dropdown;
-    GtkStringList *device_model;
+    // "Undo" page state
+    GList *uninstalled_app_list; // GList of AppItem* for the "Undo" page
+    GtkWidget *uninstalled_list_box; // UI list for the "Undo" page
 
-    gchar *selected_device_id;        // The real device serial (e.g., "ABC12345")
-    gchar *selected_manufacturer_id;  // The list to show (e.g., "Samsung")
-    GList *app_list; // List of AppItem*
-    
-    GList *uninstalled_app_list; // List of uninstalled AppItem*
-    GtkWidget *uninstalled_list_box; // The UI list for uninstalled apps
-
-    // NEW: Widget for device status
-    GtkWidget *device_status_label;
-
-    // NEW: Widgets for Debug Page
-    GtkWidget *debug_command_entry;
-    GtkTextBuffer *debug_output_buffer;
+    // "Debug" page widgets
+    GtkWidget *debug_command_entry; // Text entry for custom commands
+    GtkTextBuffer *debug_output_buffer; // Text buffer for command output
 
 } AppState;
 
-// Global state instance
+// Global state instance, initialized in main()
 static AppState *app_state = NULL;
 
 // --- FUNCTION PROTOTYPES ---
@@ -60,17 +66,14 @@ static void populate_adb_devices(AppState *state);
 static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, AppState *state);
 static void on_reinstall_clicked(GtkButton *button, AppItem *item);
 static void add_row_to_uninstalled_list(AppState *state, AppItem *item);
-static void on_about_clicked(GtkButton *button, GtkWindow *parent); // <-- CHANGED
-static void show_welcome_dialog(GtkWindow *parent); // <-- NEW
-static void on_run_debug_command_clicked(GtkButton *button, AppState *state); // <-- NEW
-static void on_refresh_devices_clicked(GtkButton *button, AppState *state); // <-- NEW
+static void on_about_clicked(GtkButton *button, GtkWindow *parent);
+static void show_welcome_dialog(GtkWindow *parent);
+static void on_run_debug_command_clicked(GtkButton *button, AppState *state);
+static void on_refresh_devices_clicked(GtkButton *button, AppState *state);
 
 
 // --- PACKAGE DATA (Bloatware lists) ---
-// (Lists are unchanged, snipped for brevity)
-// ...
-// ... (SAMSUNG_APPS, XIAOMI_APPS, VIVO_APPS, etc.)
-// ...
+// ... (Lists are unchanged, snipped for brevity) ...
 
 static const PackageEntry SAMSUNG_APPS[] = {
     {"Samsung Message", "com.samsung.android.messaging"},
@@ -234,7 +237,8 @@ static const PackageEntry JIO_APPS[] = {
 // --- HELPER FUNCTIONS ---
 
 /**
- * @brief Frees memory allocated for an AppItem.
+ * @brief Frees all memory associated with an AppItem.
+ * This is used as a GDestroyNotify function for g_list_free_full.
  */
 static void app_item_free(AppItem *item) {
     g_free(item->package_name);
@@ -243,12 +247,13 @@ static void app_item_free(AppItem *item) {
 }
 
 /**
- * @brief Updates the visibility and sensitivity of the bottom action bar.
+ * @brief Shows/hides the bottom action bar based on current state.
  */
 static void update_action_bar_visibility(AppState *state) {
     gint selected_count = 0;
     GList *l;
 
+    // Count how many apps are currently checked
     for (l = state->app_list; l != NULL; l = l->next) {
         AppItem *item = (AppItem *)l->data;
         if (item->is_selected) {
@@ -256,8 +261,10 @@ static void update_action_bar_visibility(AppState *state) {
         }
     }
 
-    // New simplified logic: Do we have selected apps AND a real selected device?
+    // Logic to show/hide the bar and update its contents
     if (selected_count > 0 && state->selected_device_id != NULL) {
+        // Condition: Device selected AND apps checked
+        // Action: Show bar, enable button, show "Ready" message
         gtk_widget_set_visible(state->action_bar, TRUE);
         gchar *label_text = g_strdup_printf("Ready to debloat %d app(s) on device '%s'.", selected_count, state->selected_device_id);
         gtk_label_set_text(GTK_LABEL(state->status_label), label_text);
@@ -265,33 +272,36 @@ static void update_action_bar_visibility(AppState *state) {
         gtk_widget_set_sensitive(state->debloat_button, TRUE);
     } 
     else if (state->selected_device_id == NULL) {
+        // Condition: No device selected
+        // Action: Hide the bar. The device_status_label will show instructions.
         gtk_widget_set_visible(state->action_bar, FALSE);
-        // This message is now handled by the device_status_label
     }
     else {
-        // Device is selected, but no apps are checked
-        gtk_widget_set_visible(state->action_bar, TRUE); // Show the bar
+        // Condition: Device selected, but NO apps checked
+        // Action: Show bar, disable button, show "Select apps" message
+        gtk_widget_set_visible(state->action_bar, TRUE);
         gtk_label_set_text(GTK_LABEL(state->status_label), "Select apps from the list to remove.");
-        gtk_widget_set_sensitive(state->debloat_button, FALSE); // Keep button disabled
+        gtk_widget_set_sensitive(state->debloat_button, FALSE);
     }
 }
 
 // --- CALLBACKS ---
 
 /**
- * @brief (NEW) Shows a welcome/guide dialog on how to enable ADB.
- * Uses AdwAlertDialog, which is the modern approach.
+ * @brief Shows a welcome dialog with instructions for enabling USB Debugging.
  */
 static void show_welcome_dialog(GtkWindow *parent) {
+    // AdwAlertDialog is the modern dialog to use
     AdwDialog *dialog = adw_alert_dialog_new(
         "Welcome to Android Debloater!",
-        NULL
+        NULL // No subtitle
     );
 
+    // Add a single "Got it!" response button
     adw_alert_dialog_add_response(ADW_ALERT_DIALOG(dialog), "ok", "Got it!");
     adw_alert_dialog_set_default_response(ADW_ALERT_DIALOG(dialog), "ok");
 
-    // Create a box to hold the instructions
+    // Create a vertical box to hold the instruction text
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_set_margin_start(box, 12);
     gtk_widget_set_margin_end(box, 12);
@@ -308,29 +318,30 @@ static void show_welcome_dialog(GtkWindow *parent) {
         "5.  Connect your phone to your computer via USB.\n"
         "6.  A prompt will appear on your phone: 'Allow USB debugging?'. Check 'Always allow' and tap **OK**.";
 
+    // Create a label that understands Pango markup (for **bold**)
     GtkWidget *label = gtk_label_new(instructions);
     gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
-    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0); // Left-align
     gtk_box_append(GTK_BOX(box), label);
 
+    // Add the instruction box to the dialog's "extra child" area
     adw_alert_dialog_set_extra_child(ADW_ALERT_DIALOG(dialog), box);
 
-    // Show the dialog
-    // We cast parent to GtkWidget* as required by the function
+    // Show the dialog.
+    // We cast `parent` to GtkWidget* as required by the `choose` function.
     adw_alert_dialog_choose(ADW_ALERT_DIALOG(dialog), GTK_WIDGET(parent), NULL, NULL, NULL);
 }
 
 
 /**
- * @brief Handler for the About button. (FIXED: Uses AdwAboutDialog correctly)
+ * @brief Shows the "About" dialog.
  */
 static void on_about_clicked(GtkButton *button, GtkWindow *parent) {
-    
-    // adw_about_dialog_new() returns the AdwDialog parent type
+    // Create a new Libadwaita About Dialog
     AdwDialog *dialog = adw_about_dialog_new();
     
-    // Cast to AdwAboutDialog* to set its specific properties
+    // Set all the properties for the dialog
     adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(dialog), "Android Debloater");
     adw_about_dialog_set_version(ADW_ABOUT_DIALOG(dialog), "0.7 (Libadwaita)");
     adw_about_dialog_set_developer_name(ADW_ABOUT_DIALOG(dialog), "Kushagra Karira");
@@ -340,47 +351,46 @@ static void on_about_clicked(GtkButton *button, GtkWindow *parent) {
     adw_about_dialog_set_issue_url(ADW_ABOUT_DIALOG(dialog), "https://github.com/KushagraKarira/Debloat/issues");
     adw_about_dialog_add_link(ADW_ABOUT_DIALOG(dialog), "Project Link", "https.github.com/KushagraKarira/Debloat");
     
-    // This is the correct way to show the dialog.
-    // It automatically handles modality and being "transient for" the parent.
-    // Cast the parent GtkWindow to a GtkWidget
+    // Present the dialog modally over the parent window
     adw_dialog_present(dialog, GTK_WIDGET(parent));
 }
 
 /**
- * @brief Handler for when an app's checkbox is toggled.
+ * @brief Called when an app's checkbox is toggled.
  */
 static void on_app_toggled(GtkCheckButton *check_button, AppItem *item) {
+    // Update the state of the app item
     item->is_selected = gtk_check_button_get_active(check_button);
+    // Refresh the action bar (which might show/hide it)
     update_action_bar_visibility(app_state);
 }
 
 /**
- * @brief Handler for when a device is selected in the left list.
+ * @brief Called when a manufacturer (device category) is selected from the left list.
  */
 static void on_device_selected(GtkListBox *list_box, GtkListBoxRow *row, AppState *state) {
     if (!row) return;
 
-    // Get the device ID stored in the row
+    // Get the unique ID (e.g., "Samsung") stored in the row
     const gchar *manufacturer_id = g_object_get_data(G_OBJECT(row), "device-id");
     if (!manufacturer_id) return;
 
-    // Store the selected MANUFACTURER ID
+    // Update the global state
     if (state->selected_manufacturer_id) g_free(state->selected_manufacturer_id);
     state->selected_manufacturer_id = g_strdup(manufacturer_id);
     
     g_print("Manufacturer list selected: %s\n", state->selected_manufacturer_id);
     
-    // Disable the debloat button immediately until a package is selected
-    gtk_widget_set_sensitive(state->debloat_button, FALSE);
+    // Hide the action bar until apps are loaded and selected
     gtk_widget_set_visible(state->action_bar, FALSE);
 
-    // Load app list for the new device category
+    // Reload the app list on the right side
     update_app_list(state);
 }
 
 
 /**
- * @brief Runs 'adb devices' and populates the device_dropdown.
+ * @brief Runs `adb devices` to find connected devices and populates the dropdown.
  */
 static void populate_adb_devices(AppState *state) {
     gchar *stdout_str = NULL;
@@ -393,28 +403,34 @@ static void populate_adb_devices(AppState *state) {
     g_print("Running: adb devices\n");
     gtk_label_set_text(GTK_LABEL(state->device_status_label), "Refreshing device list...");
 
-    // --- START FIX V3 ---
-    // Clear the existing list, but keep the placeholder at index 0
+    // Clear all items *except* the placeholder at index 0
     guint n_items = g_list_model_get_n_items(G_LIST_MODEL(state->device_model));
-    // Remove items from index 1 (the one after the placeholder)
-    while (n_items > 1) {
-        gtk_string_list_remove(state->device_model, 1);
-        n_items--;
+    if (n_items > 1) {
+        // Remove n_items - 1, starting from position 1
+        gtk_string_list_splice(state->device_model, 1, n_items - 1, NULL);
     }
-    // --- END FIX V3 ---
     
-    // Set default selection to the placeholder
+    // Reset dropdown to the placeholder
     gtk_drop_down_set_selected(GTK_DROP_DOWN(state->device_dropdown), 0);
     if (state->selected_device_id) {
         g_free(state->selected_device_id);
         state->selected_device_id = NULL;
     }
 
+    // Run the 'adb devices' command synchronously
     g_spawn_sync(
-        NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
-        NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
+        NULL,        // working directory
+        cmd_args,    // command and arguments
+        NULL,        // environment
+        G_SPAWN_SEARCH_PATH, // flags (find 'adb' in PATH)
+        NULL, NULL,  // child setup, user data
+        &stdout_str, // standard output
+        &stderr_str, // standard error
+        &exit_status, // exit status
+        &error       // GError
     );
 
+    // Handle command execution errors (e.g., 'adb' not found)
     if (error) {
         g_printerr("Failed to execute 'adb': %s. Is it in your PATH?\n", error->message);
         gtk_label_set_text(GTK_LABEL(state->device_status_label), "Error: 'adb' command not found.");
@@ -424,24 +440,26 @@ static void populate_adb_devices(AppState *state) {
         return;
     }
 
+    // Parse the command's output
     if (stdout_str) {
         g_print("ADB Output:\n%s\n", stdout_str);
         
-        // Split the output by lines
         gchar **lines = g_strsplit(stdout_str, "\n", -1);
         
+        // Iterate over each line of the output
         for (int i = 0; lines[i] != NULL; i++) {
             // Skip the first line ("List of devices attached")
             if (i == 0) continue;
 
-            // Split line by tab
+            // Split the line by tabs (e.g., "ABC12345\tdevice")
             gchar **parts = g_strsplit(lines[i], "\t", 2);
             
+            // A valid line has two parts
             if (g_strv_length(parts) == 2) {
                 gchar *device_id = g_strstrip(parts[0]);
                 gchar *device_state = g_strstrip(parts[1]);
 
-                // Only add devices that are fully connected
+                // We only care about fully authorized devices
                 if (g_strcmp0(device_state, "device") == 0) {
                     g_print("Found device: %s\n", device_id);
                     gtk_string_list_append(state->device_model, device_id);
@@ -453,7 +471,7 @@ static void populate_adb_devices(AppState *state) {
         g_strfreev(lines);
     }
     
-    // Update status label
+    // Update the status label with the result
     gchar *status_msg;
     if (devices_found > 0) {
         status_msg = g_strdup_printf("Found %d device(s). Select one to begin.", devices_found);
@@ -465,22 +483,26 @@ static void populate_adb_devices(AppState *state) {
 
     g_free(stdout_str);
     g_free(stderr_str);
+    
+    // Refresh the action bar (it will be hidden)
     update_action_bar_visibility(state);
 }
 
 /**
- * @brief Handler for when a device is selected from the ADB dropdown. (FIXED: Added missing function)
+ * @brief Called when a *real* device is selected from the dropdown.
  */
 static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, AppState *state) {
     guint pos = gtk_drop_down_get_selected(dropdown);
 
+    // Free the previously selected device ID, if any
     if (state->selected_device_id) {
         g_free(state->selected_device_id);
         state->selected_device_id = NULL;
     }
 
-    // pos 0 is the "Select a connected device..." placeholder
+    // Position 0 is the "Select a connected device..." placeholder
     if (pos > 0) {
+        // Get the device serial from the list model and store it
         const gchar *device_id = gtk_string_list_get_string(state->device_model, pos);
         state->selected_device_id = g_strdup(device_id);
         g_print("ADB device selected: %s\n", state->selected_device_id);
@@ -489,12 +511,13 @@ static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, App
         g_print("No ADB device selected.\n");
     }
     
+    // Refresh the action bar state
     update_action_bar_visibility(state);
 }
 
 
 /**
- * @brief Simple callback to refresh the ADB device list. (FIXED: Added missing function)
+ * @brief Called when the "Refresh" button next to the device dropdown is clicked.
  */
 static void on_refresh_devices_clicked(GtkButton *button, AppState *state) {
     populate_adb_devices(state);
@@ -502,12 +525,13 @@ static void on_refresh_devices_clicked(GtkButton *button, AppState *state) {
 
 
 /**
- * @brief Handler for the "Undo" (Reinstall) button click.
+ * @brief Called when an "Undo" (reinstall) button is clicked.
  */
 static void on_reinstall_clicked(GtkButton *button, AppItem *item) {
-    // Use the global app_state to get the selected device ID
+    // Check if a device is selected (must be the global state)
     if (!app_state || !app_state->selected_device_id) {
         g_printerr("Cannot reinstall: No ADB device selected.\n");
+        // Note: status_label is on a different page, this message may not be seen.
         gtk_label_set_text(GTK_LABEL(app_state->status_label), "Error: Select ADB device to reinstall.");
         return;
     }
@@ -520,7 +544,7 @@ static void on_reinstall_clicked(GtkButton *button, AppItem *item) {
     gint exit_status;
     GError *error = NULL;
 
-    // Use the 'cmd package install-existing' command
+    // Command: "adb -s <device> shell cmd package install-existing <package>"
     gchar *cmd_args[] = {
         "adb",
         "-s", app_state->selected_device_id,
@@ -532,6 +556,7 @@ static void on_reinstall_clicked(GtkButton *button, AppItem *item) {
         NULL
     };
 
+    // Run the reinstall command
     g_spawn_sync(
         NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
         NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
@@ -540,27 +565,28 @@ static void on_reinstall_clicked(GtkButton *button, AppItem *item) {
     gchar *stripped_output = stdout_str ? g_strstrip(stdout_str) : NULL;
 
     if (error) {
-        g_printerr("Reinstall failed: %s\n", error->message);
+        g_printerr("Reinstall failed (spawn error): %s\n", error->message);
         g_error_free(error);
     } else if (stripped_output && g_str_has_prefix(stripped_output, "Package")) {
         // Success output is usually "Package com.example.app installed..."
         g_print("Reinstall successful.\n");
         
-        // Remove from UI
+        // Remove the row from the "Undo" list UI
         gtk_list_box_remove(GTK_LIST_BOX(app_state->uninstalled_list_box), item->uninstalled_list_row);
         
-        // Remove from data list
+        // Remove the item from the "Undo" data list
         app_state->uninstalled_app_list = g_list_remove(app_state->uninstalled_app_list, item);
         
-        // Free the item data (it's no longer tracked)
+        // The item is no longer tracked anywhere, so free it
         app_item_free(item);
         
-        // We don't need to re-enable the button, it's being destroyed.
+        // We don't need to re-enable the button, it is being destroyed with the row.
     } else {
+        // ADB command failed
         g_printerr("Reinstall failed. STDOUT: %s, STDERR: %s\n", 
             stdout_str ? stdout_str : "None", 
             stderr_str ? stderr_str : "None");
-        gtk_widget_set_sensitive(GTK_WIDGET(button), TRUE); // Re-enable on failure
+        gtk_widget_set_sensitive(GTK_WIDGET(button), TRUE); // Re-enable button on failure
     }
 
     g_free(stdout_str);
@@ -586,7 +612,7 @@ static void add_row_to_uninstalled_list(AppState *state, AppItem *item) {
     gtk_box_append(GTK_BOX(hbox), reinstall_button);
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), hbox);
     
-    // Store a reference to the new row
+    // Store a reference to the new row in the item
     item->uninstalled_list_row = row; 
 
     gtk_list_box_append(GTK_LIST_BOX(state->uninstalled_list_box), row);
@@ -594,22 +620,24 @@ static void add_row_to_uninstalled_list(AppState *state, AppItem *item) {
 
 
 /**
- * @brief Handler for the Debloat button click. Executes the actual ADB uninstall command.
+ * @brief Called when the "Remove" button is clicked. Runs ADB uninstall commands.
  */
 static void on_debloat_clicked(GtkButton *button, AppState *state) {
     gint count = 0;
     gint success_count = 0;
     gint failure_count = 0;
     GList *items_to_remove = NULL;
-    gboolean error_in_adb_path = FALSE;
+    gboolean error_in_adb_path = FALSE; // Flag for catastrophic failure
 
+    // Disable button and update status
     gtk_widget_set_sensitive(state->debloat_button, FALSE);
     gtk_label_set_text(GTK_LABEL(state->status_label), "Starting real ADB debloat process...");
 
+    // Iterate through the app list
     GList *current_l = state->app_list;
     while (current_l != NULL) {
         AppItem *item = (AppItem *)current_l->data;
-        GList *next_l = current_l->next; 
+        GList *next_l = current_l->next; // Store next item in case current is removed
 
         if (item->is_selected) {
             count++;
@@ -621,15 +649,16 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
             GError *error = NULL;
             gboolean uninstall_successful = FALSE;
 
-            // Construct the command arguments array
+            // Construct the command:
+            // "adb -s <device> shell pm uninstall --user 0 <package>"
             gchar *cmd_args[] = {
                 "adb",
-                "-s", state->selected_device_id, // Use the device ID
+                "-s", state->selected_device_id, // Use the selected device
                 "shell", 
                 "pm", 
                 "uninstall", 
                 "--user", 
-                "0", 
+                "0", // For the current user
                 item->package_name,
                 NULL
             };
@@ -638,50 +667,44 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
             g_print("Executing: adb -s %s shell pm uninstall --user 0 %s\n", 
                         state->selected_device_id, item->package_name);
             
-            // Execute the command using g_spawn_sync
+            // Execute the uninstall command
             spawn_success = g_spawn_sync(
-                NULL,            // working_directory
-                cmd_args,        // argv
-                NULL,            // envp
-                G_SPAWN_SEARCH_PATH, // flags: search for 'adb' in PATH
-                NULL,            // child_setup
-                NULL,            // user_data
-                &stdout_str,     // standard output
-                &stderr_str,     // standard error
-                &exit_status,    // exit status
-                &error           // error
+                NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
+                NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
             );
 
+            // --- Check results ---
             if (error) {
-                // This usually means ADB could not be found or executed (e.g., path issue, permissions)
+                // Failure to *execute* 'adb' (e.g., not in PATH)
                 g_printerr("ADB Execution Error for package %s: %s\n", item->package_name, error->message);
                 g_error_free(error);
                 failure_count++;
-                error_in_adb_path = TRUE;
+                error_in_adb_path = TRUE; // Mark as catastrophic
             } else if (!spawn_success) {
-                 // Should be covered by the error block, but included for completeness
+                 // Should be covered by `error`, but good to check
                  g_printerr("ADB Command failed to start for package %s.\n", item->package_name);
                  failure_count++;
             } else {
-                // Command ran successfully, check the output for ADB result
-                // FIX: Use g_strstrip (lowercase s) to clean output
+                // Command *ran*, now check ADB's output
                 gchar *stripped_output = stdout_str ? g_strstrip(stdout_str) : NULL;
                 
                 if (stripped_output && g_str_has_prefix(stripped_output, "Success")) {
+                    // ADB reported success
                     uninstall_successful = TRUE;
                     g_print("ADB Output: Success\n");
-                } else if (stripped_output && g_str_has_prefix(stripped_output, "Failure")) {
-                    // ADB reports Failure for various reasons (e.g., package not found, protected package)
-                    g_print("ADB Output: Failure (Stdout: %s)\n", stripped_output);
-                } else if (WEXITSTATUS(exit_status) != 0) {
-                    // Non-zero exit status (e.g., device offline)
-                    g_print("ADB Command Failed (Exit: %d). Stderr: %s\n", WEXITSTATUS(exit_status), stderr_str ? stderr_str : "None");
+                } else {
+                    // ADB reported failure (e.g., "Failure [not installed for user 0]")
+                    g_print("ADB Output: Failure (Stdout: %s, Stderr: %s)\n", 
+                        stripped_output ? stripped_output : "None",
+                        stderr_str ? stderr_str : "None"
+                    );
                 }
                 
                 if (uninstall_successful) {
                     success_count++;
-                    // Mark for UI removal and cleanup
+                    // Add to a temporary list for removal from the UI
                     items_to_remove = g_list_append(items_to_remove, item);
+                    // Remove from the "Debloat" list UI immediately
                     gtk_list_box_remove(GTK_LIST_BOX(state->app_list_box), item->main_list_row);
                 } else {
                     failure_count++;
@@ -691,35 +714,39 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
             g_free(stdout_str);
             g_free(stderr_str);
             g_print("---------------------------------\n");
-            if (error_in_adb_path) break; // Stop if ADB execution failed globally
+            
+            // If 'adb' itself failed, don't try any more packages
+            if (error_in_adb_path) break;
         }
-        current_l = next_l; 
+        current_l = next_l; // Move to the next item
     }
 
-    // Move successful items from the main list to the uninstalled list
+    // --- Post-loop cleanup ---
+    // Move all successfully removed items to the "Undo" list
     GList *remove_l;
     for (remove_l = items_to_remove; remove_l != NULL; remove_l = remove_l->next) {
         AppItem *item = (AppItem *)remove_l->data;
         
-        // 1. Remove from main app list
+        // 1. Remove from "Debloat" data list
         state->app_list = g_list_remove(state->app_list, item);
         
-        // 2. Add to uninstalled data list
+        // 2. Add to "Undo" data list
         state->uninstalled_app_list = g_list_append(state->uninstalled_app_list, item);
         
-        // 3. Add to uninstalled UI list
+        // 3. Add to "Undo" UI list
         add_row_to_uninstalled_list(state, item);
         
-        // 4. We DO NOT free the item
+        // 4. Reset selection state (no longer selected)
+        item->is_selected = FALSE;
     }
-    g_list_free(items_to_remove);
+    g_list_free(items_to_remove); // Free the temporary list
 
 
-    // Update status and reset selection
+    // --- Final Status Update ---
     gchar *result_msg;
     if (error_in_adb_path) {
         result_msg = g_strdup_printf(
-            "FATAL ERROR: Could not execute 'adb'. Check your system path and ensure ADB is installed and authorized."
+            "FATAL ERROR: Could not execute 'adb'. Check your PATH."
         );
     } else {
         result_msg = g_strdup_printf(
@@ -732,13 +759,14 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
     gtk_label_set_text(GTK_LABEL(state->status_label), result_msg);
     g_free(result_msg);
 
+    // Re-enable the button and update the action bar
     gtk_widget_set_sensitive(state->debloat_button, TRUE);
     update_action_bar_visibility(state);
 }
 
 
 /**
- * @brief Handler for running custom ADB shell commands from the Debug page. (NEW)
+ * @brief Runs a custom command from the "Debug" page.
  */
 static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
     // 1. Check if a device is selected
@@ -754,35 +782,34 @@ static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
         return;
     }
 
-    // 3. Construct the full adb command
-    // We will run "adb -s <device> shell <command_str>"
-    // g_spawn_sync needs a NULL-terminated array.
-    // We split the user's command string by spaces
-    gchar **user_cmd_parts = g_strsplit(command_str, " ", -1);
+    // 3. Construct the full 'argv' array for g_spawn_sync
+    // We need to run: "adb" "-s" "<device>" "shell" <user_command_parts...>
     
-    // Count how many parts we have
+    // Split the user's command string by spaces
+    gchar **user_cmd_parts = g_strsplit(command_str, " ", -1);
     gint user_cmd_len = g_strv_length(user_cmd_parts);
     
-    // Create a new array large enough for: "adb", "-s", device_id, "shell", ...user_cmd_parts, NULL
+    // Create a new array large enough for:
+    // "adb", "-s", device_id, "shell", (user parts), NULL
     gchar **cmd_args = g_new(gchar*, 5 + user_cmd_len);
     cmd_args[0] = "adb";
     cmd_args[1] = "-s";
     cmd_args[2] = state->selected_device_id;
     cmd_args[3] = "shell";
     
-    // Copy the user's command parts
+    // Copy the user's command parts into the main array
     for (int i = 0; i < user_cmd_len; i++) {
         cmd_args[4 + i] = user_cmd_parts[i];
     }
-    cmd_args[4 + user_cmd_len] = NULL; // NULL terminator
+    cmd_args[4 + user_cmd_len] = NULL; // Must be NULL-terminated
 
     // 4. Clear the output buffer and show "Running..."
     gtk_text_buffer_set_text(state->debug_output_buffer, "", -1);
     GtkTextIter iter;
     gtk_text_buffer_get_end_iter(state->debug_output_buffer, &iter);
-    gtk_text_buffer_insert(state->debug_output_buffer, &iter, "Running command:\n", -1);
     
     gchar *full_cmd_display = g_strjoinv(" ", cmd_args);
+    gtk_text_buffer_insert(state->debug_output_buffer, &iter, "Running command:\n", -1);
     gtk_text_buffer_insert(state->debug_output_buffer, &iter, full_cmd_display, -1);
     gtk_text_buffer_insert(state->debug_output_buffer, &iter, "\n\n", -1);
     g_free(full_cmd_display);
@@ -798,7 +825,7 @@ static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
         NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
     );
 
-    // 6. Print results to the text buffer
+    // 6. Print all results (stdout, stderr, exit code) to the text buffer
     if (error) {
         gchar *err_msg = g_strdup_printf("--- EXECUTION FAILED ---\n%s\n", error->message);
         gtk_text_buffer_insert(state->debug_output_buffer, &iter, err_msg, -1);
@@ -824,7 +851,7 @@ static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
         g_free(exit_msg);
     }
 
-    // 7. Clean up
+    // 7. Clean up memory
     g_free(stdout_str);
     g_free(stderr_str);
     g_strfreev(user_cmd_parts);
@@ -835,98 +862,82 @@ static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
 // --- LIST POPULATION FUNCTIONS ---
 
 /**
- * @brief Populates the Device List with options.
+ * @brief Populates the left-side manufacturer (category) list.
  */
 static void update_device_list(AppState *state) {
-    // Clear existing list
+    // Clear any existing rows
     GtkListBoxRow *row;
     while ((row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(state->device_list_box), 0))) {
         gtk_list_box_remove(GTK_LIST_BOX(state->device_list_box), GTK_WIDGET(row));
     }
 
-    // Device display names and unique IDs (These are category IDs)
+    // Device category names
     const gchar *mock_devices[] = {
-        "Samsung (Galaxy Devices)",
-        "Xiaomi (Mi/Redmi Devices)",
-        "OnePlus (Oxygen OS)",
-        "Oppo (ColorOS)",
-        "RealMe (ColorOS/RealMe UI)",
-        "Vivo (Funtouch OS)",
-        "Sony (Xperia Devices)",
-        "Motorola (Moto Devices)",
-        "Nokia (HMD Devices)",
-        "TCL (Alcatel/TCL Devices)",
-        "ZTE (Nubia/Axon Devices)",
-        "Jio (STB/Phone)",
+        "Samsung (Galaxy Devices)", "Xiaomi (Mi/Redmi Devices)", "OnePlus (Oxygen OS)",
+        "Oppo (ColorOS)", "RealMe (ColorOS/RealMe UI)", "Vivo (Funtouch OS)",
+        "Sony (Xperia Devices)", "Motorola (Moto Devices)", "Nokia (HMD Devices)",
+        "TCL (Alcatel/TCL Devices)", "ZTE (Nubia/Axon Devices)", "Jio (STB/Phone)",
         NULL
     };
 
+    // Unique IDs for each category
     const gchar *mock_ids[] = {
-        "Samsung",
-        "Xiaomi",
-        "OnePlus",
-        "Oppo",
-        "RealMe",
-        "Vivo",
-        "Sony",
-        "Motorola",
-        "Nokia",
-        "TCL",
-        "ZTE",
-        "Jio",
+        "Samsung", "Xiaomi", "OnePlus", "Oppo", "RealMe", "Vivo",
+        "Sony", "Motorola", "Nokia", "TCL", "ZTE", "Jio",
         NULL
     };
 
     GtkListBoxRow *initial_row = NULL;
 
+    // Create a row for each manufacturer
     for (int i = 0; mock_devices[i] != NULL; i++) {
         GtkWidget *row_widget = gtk_list_box_row_new();
         GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
 
-        // Device Icon
         GtkWidget *icon = gtk_image_new_from_icon_name("phone-symbolic");
-        gtk_image_set_pixel_size(GTK_IMAGE(icon), 24); // <-- SETTING ICON SIZE
+        gtk_image_set_pixel_size(GTK_IMAGE(icon), 24); // Make icon larger
         gtk_box_append(GTK_BOX(hbox), icon);
         
-        // Device Label
         GtkWidget *label = gtk_label_new(mock_devices[i]);
         gtk_label_set_xalign(GTK_LABEL(label), 0.0);
         gtk_box_append(GTK_BOX(hbox), label);
         
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row_widget), hbox);
 
-        // Store the device ID
+        // Store the category ID (e.g., "Samsung") as data on the row
         g_object_set_data(G_OBJECT(row_widget), "device-id", g_strdup(mock_ids[i]));
 
         gtk_list_box_append(GTK_LIST_BOX(state->device_list_box), row_widget);
 
-        // Select the row corresponding to the initial state->selected_manufacturer_id
+        // Check if this is the one we should select by default
         if (g_strcmp0(mock_ids[i], state->selected_manufacturer_id) == 0) {
             initial_row = GTK_LIST_BOX_ROW(row_widget);
         }
     }
 
-    // Automatically select the initial device
+    // Automatically select the default manufacturer
     if (initial_row) {
         gtk_list_box_select_row(GTK_LIST_BOX(state->device_list_box), initial_row);
-        // Manually trigger the selection handler to load apps
+        // Manually trigger the selection handler to load apps for the first time
         on_device_selected(GTK_LIST_BOX(state->device_list_box), initial_row, state);
     }
 }
 
 /**
- * @brief Populates the App List with packages for the selected device category.
+ * @brief Populates the right-side app list based on the selected manufacturer.
  */
 static void update_app_list(AppState *state) {
-    // Clear existing app list and free internal state
+    // Clear existing app list UI
     GtkListBoxRow *row;
     while ((row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(state->app_list_box), 0))) {
         gtk_list_box_remove(GTK_LIST_BOX(state->app_list_box), GTK_WIDGET(row));
     }
+    // Free all AppItem structs from the previous list
     g_list_free_full(state->app_list, (GDestroyNotify)app_item_free);
     state->app_list = NULL;
 
-    // Determine which package list to load based on the category ID
+    // This large if/else block maps the category ID to the correct static array.
+    // A GHashTable could also be used, but this is simple and clear.
     const PackageEntry *packages_to_load = NULL;
     const gchar *category_id = state->selected_manufacturer_id;
 
@@ -963,51 +974,54 @@ static void update_app_list(AppState *state) {
         return;
     }
 
-
-    // Populate list box with the selected packages
+    // Populate the list box with the selected packages
     for (int i = 0; packages_to_load[i].display_name != NULL; i++) {
+        // Create a new AppItem to track this app's state
         AppItem *item = g_new0(AppItem, 1);
         item->display_name = g_strdup(packages_to_load[i].display_name);
         item->package_name = g_strdup(packages_to_load[i].package_name);
         item->is_selected = FALSE;
 
+        // --- Create the UI row ---
         GtkWidget *row_widget = gtk_list_box_row_new();
         GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 15); 
 
-        // 1. Checkbox
         GtkWidget *check = gtk_check_button_new();
         gtk_box_append(GTK_BOX(hbox), check);
 
-        // 2. App Icon
         GtkWidget *icon = gtk_image_new_from_icon_name("package-x-generic-symbolic"); 
         gtk_image_set_pixel_size(GTK_IMAGE(icon), 16); 
         gtk_box_append(GTK_BOX(hbox), icon);
         
-        // 3. Labels (Display Name and Package Name)
+        // VBox for Display Name + Package Name
         GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
         GtkWidget *display_label = gtk_label_new(item->display_name);
         GtkWidget *package_label = gtk_label_new(item->package_name);
 
         gtk_label_set_xalign(GTK_LABEL(display_label), 0.0);
         gtk_label_set_xalign(GTK_LABEL(package_label), 0.0);
-        gtk_widget_set_opacity(package_label, 0.6); 
-        gtk_widget_set_margin_bottom(package_label, 3); 
+        gtk_widget_add_css_class(package_label, "caption"); // Use caption style for smaller text
+        gtk_widget_set_opacity(package_label, 0.7); 
 
         gtk_box_append(GTK_BOX(vbox), display_label);
         gtk_box_append(GTK_BOX(vbox), package_label);
         gtk_box_append(GTK_BOX(hbox), vbox);
+        // --- End UI row ---
 
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row_widget), hbox);
         gtk_list_box_append(GTK_LIST_BOX(state->app_list_box), row_widget);
 
-        // Store reference and connect signal
+        // Store reference to the row for later removal
         item->main_list_row = row_widget;
+        
+        // Connect the checkbox to its callback, passing the 'item'
         g_signal_connect(check, "toggled", G_CALLBACK(on_app_toggled), item);
 
+        // Add the new item to our data list
         state->app_list = g_list_append(state->app_list, item);
     }
 
-    // Ensure the action bar is hidden/updated
+    // Refresh the action bar (it will be hidden)
     update_action_bar_visibility(state);
 }
 
@@ -1015,53 +1029,57 @@ static void update_app_list(AppState *state) {
 // --- UI SETUP ---
 
 /**
- * @brief Creates the main application window and UI elements.
+ * @brief Creates all UI widgets and connects signals.
  */
 static void activate(GtkApplication *app, AppState *state) {
     // Initialize application state
-    state->selected_device_id = NULL; // No device selected at start
-    state->selected_manufacturer_id = g_strdup("Oppo"); // Default list to show
+    state->selected_device_id = NULL;
+    state->selected_manufacturer_id = g_strdup("Samsung"); // Default category to show
     state->app_list = NULL;
     state->uninstalled_app_list = NULL; 
 
-    // Create main window
+    // --- Window ---
     state->window = ADW_APPLICATION_WINDOW(adw_application_window_new(GTK_APPLICATION(app)));
     gtk_window_set_title(GTK_WINDOW(state->window), "Android Debloater");
-    gtk_window_set_default_size(GTK_WINDOW(state->window), 900, 600); // Reset height
+    gtk_window_set_default_size(GTK_WINDOW(state->window), 900, 600);
 
-    // --- Main Vertical Box (Header + Stack) ---
     GtkWidget *main_content_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     adw_application_window_set_content(state->window, main_content_box);
 
-    // --- HEADER BAR with StackSwitcher and About Button ---
+    // --- Header Bar ---
     GtkWidget *header_bar = adw_header_bar_new();
     gtk_box_append(GTK_BOX(main_content_box), header_bar);
 
+    // Stack switcher will sit in the middle of the header bar
     GtkWidget *stack_switcher = gtk_stack_switcher_new();
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header_bar), stack_switcher);
 
-    GtkWidget *about_button = gtk_button_new_from_icon_name("help-about-symbolic"); // <-- FIXED ICON NAME
+    // "About" button on the right
+    GtkWidget *about_button = gtk_button_new_from_icon_name("help-about-symbolic");
     adw_header_bar_pack_end(ADW_HEADER_BAR(header_bar), about_button);
     g_signal_connect(about_button, "clicked", G_CALLBACK(on_about_clicked), GTK_WINDOW(state->window));
 
-    // --- Main Stack (Debloat Page, Undo Page, Debug Page) ---
+    // --- Main Stack (for Pages) ---
     GtkWidget *stack = gtk_stack_new();
     gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(stack_switcher), GTK_STACK(stack));
     gtk_box_append(GTK_BOX(main_content_box), stack);
 
 
-    // --- PAGE 1: DEBLOAT (Paned Layout) ---
+    // --- PAGE 1: DEBLOAT ---
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_stack_add_titled(GTK_STACK(stack), paned, "debloat", "Debloat");
 
-    // --- LEFT PANE (Device Selection) ---
+    // --- Left Pane (Device Selection) ---
     GtkWidget *left_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_widget_set_margin_start(left_box, 10);
     gtk_widget_set_margin_end(left_box, 10);
     gtk_widget_set_margin_top(left_box, 10);
     gtk_widget_set_margin_bottom(left_box, 10);
+    gtk_paned_set_start_child(GTK_PANED(paned), left_box);
+    gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE); 
+    gtk_paned_set_shrink_start_child(GTK_PANED(paned), FALSE);
 
-    // --- ADB Device Selector ---
+    // ADB Device Dropdown
     GtkWidget *adb_header = gtk_label_new("Select Connected Device");
     gtk_widget_add_css_class(adb_header, "title-4");
     gtk_label_set_xalign(GTK_LABEL(adb_header), 0.0);
@@ -1070,36 +1088,31 @@ static void activate(GtkApplication *app, AppState *state) {
     GtkWidget *adb_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_append(GTK_BOX(left_box), adb_hbox);
 
-    // The Dropdown Menu
     state->device_model = gtk_string_list_new(NULL);
-    // Add placeholder *immediately*
     gtk_string_list_append(state->device_model, "Select a connected device...");
     state->device_dropdown = gtk_drop_down_new(G_LIST_MODEL(state->device_model), NULL);
     gtk_widget_set_hexpand(state->device_dropdown, TRUE);
     g_signal_connect(state->device_dropdown, "notify::selected", G_CALLBACK(on_adb_device_selected), state);
     gtk_box_append(GTK_BOX(adb_hbox), state->device_dropdown);
 
-    // The Refresh Button
     GtkWidget *refresh_button = gtk_button_new_from_icon_name("view-refresh-symbolic");
     gtk_widget_set_tooltip_text(refresh_button, "Refresh ADB Device List");
     g_signal_connect(refresh_button, "clicked", G_CALLBACK(on_refresh_devices_clicked), state);
     gtk_box_append(GTK_BOX(adb_hbox), refresh_button);
 
-    // --- NEW: Device Status Label (replaces wireless) ---
+    // Device Status Label
     state->device_status_label = gtk_label_new("Welcome! Connect a device.");
     gtk_widget_set_margin_top(state->device_status_label, 5);
     gtk_label_set_xalign(GTK_LABEL(state->device_status_label), 0.0);
     gtk_label_set_wrap(GTK_LABEL(state->device_status_label), TRUE);
     gtk_box_append(GTK_BOX(left_box), state->device_status_label);
-    // --- END NEW ---
 
-
-    // --- Manufacturer List ---
-    GtkWidget *device_header = gtk_label_new("Select Manufacturer List"); // Title changed
+    // Manufacturer List
+    GtkWidget *device_header = gtk_label_new("Select Manufacturer List");
     gtk_widget_add_css_class(device_header, "title-4");
     gtk_label_set_xalign(GTK_LABEL(device_header), 0.0);
-    gtk_box_append(GTK_BOX(left_box), device_header);
     gtk_widget_set_margin_top(device_header, 10);
+    gtk_box_append(GTK_BOX(left_box), device_header);
 
     state->device_list_box = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->device_list_box), GTK_SELECTION_SINGLE);
@@ -1108,55 +1121,46 @@ static void activate(GtkApplication *app, AppState *state) {
     GtkWidget *device_scrolled = gtk_scrolled_window_new();
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(device_scrolled), state->device_list_box);
     gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(device_scrolled), 200);
-
-    gtk_widget_set_hexpand(state->device_list_box, TRUE);
-    gtk_widget_set_vexpand(state->device_list_box, TRUE);
-
+    gtk_widget_set_vexpand(device_scrolled, TRUE);
     gtk_box_append(GTK_BOX(left_box), device_scrolled);
-    
-    // Add left_box to paned
-    gtk_paned_set_start_child(GTK_PANED(paned), left_box);
-    gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE); 
-    gtk_paned_set_shrink_start_child(GTK_PANED(paned), FALSE);
 
-    // --- RIGHT PANE (App List) ---
+    // --- Right Pane (App List & Action Bar) ---
+    GtkWidget *right_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_paned_set_end_child(GTK_PANED(paned), right_container);
+
     GtkWidget *right_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_vexpand(right_vbox, TRUE);
+    gtk_box_append(GTK_BOX(right_container), right_vbox);
+
     GtkWidget *app_header = gtk_label_new("Installed User/System Apps (Select to Debloat)");
     gtk_widget_add_css_class(app_header, "title-4");
-    gtk_box_append(GTK_BOX(right_vbox), app_header);
     gtk_widget_set_margin_top(app_header, 10);
     gtk_widget_set_margin_bottom(app_header, 5);
+    gtk_box_append(GTK_BOX(right_vbox), app_header);
     
     state->app_list_box = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->app_list_box), GTK_SELECTION_NONE);
 
     GtkWidget *app_scrolled = gtk_scrolled_window_new();
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(app_scrolled), state->app_list_box);
-    gtk_box_append(GTK_BOX(right_vbox), app_scrolled);
     gtk_widget_set_vexpand(app_scrolled, TRUE);
+    gtk_box_append(GTK_BOX(right_vbox), app_scrolled);
 
-    // --- BOTTOM ACTION BAR (Debloat) ---
+    // Bottom Action Bar
     state->action_bar = gtk_action_bar_new();
-    gtk_widget_set_visible(state->action_bar, FALSE); 
+    gtk_widget_set_visible(state->action_bar, FALSE); // Hide by default
+    gtk_box_append(GTK_BOX(right_container), state->action_bar);
 
     state->status_label = gtk_label_new("Select a device and then select apps to debloat.");
     gtk_action_bar_pack_start(GTK_ACTION_BAR(state->action_bar), state->status_label);
 
-    state->debloat_button = gtk_button_new_with_label("Remove"); // <-- CHANGED
+    state->debloat_button = gtk_button_new_with_label("Remove");
     gtk_widget_set_tooltip_text(state->debloat_button, "Uninstall selected apps from the device");
     gtk_widget_add_css_class(state->debloat_button, "destructive-action");
     gtk_action_bar_pack_end(GTK_ACTION_BAR(state->action_bar), state->debloat_button);
     g_signal_connect(state->debloat_button, "clicked", G_CALLBACK(on_debloat_clicked), state);
-
-    // Combine right content and action bar
-    GtkWidget *right_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append(GTK_BOX(right_container), right_vbox);
-    gtk_box_append(GTK_BOX(right_container), state->action_bar);
-
-    gtk_paned_set_end_child(GTK_PANED(paned), right_container);
-
-    // Set initial paned position 
-    gtk_paned_set_position(GTK_PANED(paned), 320); // Reset width
+    
+    gtk_paned_set_position(GTK_PANED(paned), 320); 
 
 
     // --- PAGE 2: UNDO ---
@@ -1165,8 +1169,6 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_widget_set_margin_end(undo_page_box, 10);
     gtk_widget_set_margin_top(undo_page_box, 10);
     gtk_widget_set_margin_bottom(undo_page_box, 10);
-    
-    // Add "Undo" page to the stack
     gtk_stack_add_titled(GTK_STACK(stack), undo_page_box, "undo", "Undo");
 
     GtkWidget *uninstalled_header = gtk_label_new("Recently Uninstalled (Undo)");
@@ -1181,21 +1183,18 @@ static void activate(GtkApplication *app, AppState *state) {
     GtkWidget *uninstalled_scrolled = gtk_scrolled_window_new();
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(uninstalled_scrolled), state->uninstalled_list_box);
     gtk_widget_set_vexpand(uninstalled_scrolled, TRUE);
-
     gtk_box_append(GTK_BOX(undo_page_box), uninstalled_scrolled);
 
 
-    // --- PAGE 3: DEBUG --- (NEW)
+    // --- PAGE 3: DEBUG ---
     GtkWidget *debug_page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_widget_set_margin_start(debug_page_box, 10);
     gtk_widget_set_margin_end(debug_page_box, 10);
     gtk_widget_set_margin_top(debug_page_box, 10);
     gtk_widget_set_margin_bottom(debug_page_box, 10);
-    
-    // Add "Debug" page to the stack
     gtk_stack_add_titled(GTK_STACK(stack), debug_page_box, "debug", "Debug");
 
-    // Header for command entry
+    // Header
     GtkWidget *debug_header = gtk_label_new("Run Custom ADB Shell Command");
     gtk_widget_add_css_class(debug_header, "title-4");
     gtk_label_set_xalign(GTK_LABEL(debug_header), 0.0);
@@ -1209,8 +1208,7 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_widget_add_css_class(debug_info_label, "caption");
     gtk_box_append(GTK_BOX(debug_page_box), debug_info_label);
 
-
-    // Command Entry HBox
+    // Command Entry Box
     GtkWidget *debug_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_widget_set_margin_top(debug_hbox, 5);
     gtk_box_append(GTK_BOX(debug_page_box), debug_hbox);
@@ -1246,12 +1244,13 @@ static void activate(GtkApplication *app, AppState *state) {
     
     // --- FINAL SETUP ---
 
-    // Load initial device list (which auto-selects and loads the app list)
+    // Load initial manufacturer list (which auto-selects and loads the app list)
     update_device_list(state);
     
     // Populate ADB devices at startup
     populate_adb_devices(state);
 
+    // Show the main window
     gtk_window_present(GTK_WINDOW(state->window));
 
     // Show the welcome guide dialog *after* the main window is presented
@@ -1259,9 +1258,10 @@ static void activate(GtkApplication *app, AppState *state) {
 }
 
 /**
- * @brief Frees the global state resources on application shutdown.
+ * @brief Frees all global state resources on application shutdown.
  */
 static void on_shutdown(GtkApplication *app, gpointer user_data) {
+    // Free all memory allocated and stored in the global state
     if (app_state->selected_device_id) {
         g_free(app_state->selected_device_id);
     }
@@ -1277,24 +1277,27 @@ static void on_shutdown(GtkApplication *app, gpointer user_data) {
     if (app_state->app_list) {
         g_list_free_full(app_state->app_list, (GDestroyNotify)app_item_free);
     }
+    // Finally, free the state struct itself
     g_free(app_state);
 }
 
 // --- MAIN FUNCTION ---
 
 int main(int argc, char **argv) {
-    AdwApplication *app; // <-- CHANGED
+    AdwApplication *app;
     int status;
 
-    // Allocate and initialize global state
+    // Allocate and zero-initialize global state
     app_state = g_new0(AppState, 1);
 
-    app = adw_application_new("com.gemini.debloater", G_APPLICATION_DEFAULT_FLAGS); // <-- CHANGED
+    // Create a new Libadwaita application
+    app = adw_application_new("com.gemini.debloater", G_APPLICATION_DEFAULT_FLAGS);
     
     // Connect signals
-    g_signal_connect(app, "activate", G_CALLBACK(activate), app_state);
+    g_signal_connect(app, "activate", G_CALLBACK(activate), app_state); // Pass state
     g_signal_connect(app, "shutdown", G_CALLBACK(on_shutdown), NULL);
 
+    // Run the application
     status = g_application_run(G_APPLICATION(app), argc, argv);
     g_object_unref(app);
 
