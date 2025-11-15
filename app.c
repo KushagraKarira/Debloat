@@ -338,7 +338,7 @@ static void on_about_clicked(GtkButton *button, GtkWindow *parent) {
     adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(dialog), "A GTK4/Libadwaita application for debloating Android devices using ADB.");
     adw_about_dialog_set_website(ADW_ABOUT_DIALOG(dialog), "https://kushagrakarira.com");
     adw_about_dialog_set_issue_url(ADW_ABOUT_DIALOG(dialog), "https://github.com/KushagraKarira/Debloat/issues");
-    adw_about_dialog_add_link(ADW_ABOUT_DIALOG(dialog), "Project Link", "https://github.com/KushagraKarira/Debloat");
+    adw_about_dialog_add_link(ADW_ABOUT_DIALOG(dialog), "Project Link", "https.github.com/KushagraKarira/Debloat");
     
     // This is the correct way to show the dialog.
     // It automatically handles modality and being "transient for" the parent.
@@ -885,6 +885,7 @@ static void update_device_list(AppState *state) {
 
         // Device Icon
         GtkWidget *icon = gtk_image_new_from_icon_name("phone-symbolic");
+        gtk_image_set_pixel_size(GTK_IMAGE(icon), 24); // <-- SETTING ICON SIZE
         gtk_box_append(GTK_BOX(hbox), icon);
         
         // Device Label
@@ -1039,7 +1040,7 @@ static void activate(GtkApplication *app, AppState *state) {
     GtkWidget *stack_switcher = gtk_stack_switcher_new();
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header_bar), stack_switcher);
 
-    GtkWidget *about_button = gtk_button_new_from_icon_name("help-about-symbolIC");
+    GtkWidget *about_button = gtk_button_new_from_icon_name("help-about-symbolic"); // <-- FIXED ICON NAME
     adw_header_bar_pack_end(ADW_HEADER_BAR(header_bar), about_button);
     g_signal_connect(about_button, "clicked", G_CALLBACK(on_about_clicked), GTK_WINDOW(state->window));
 
