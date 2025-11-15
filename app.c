@@ -16,7 +16,8 @@ typedef struct {
     gchar *package_name;
     gchar *display_name;
     gboolean is_selected;
-    GtkWidget *row; // Reference to the list row for easy update
+    GtkWidget *main_list_row; // Reference to the row in the main app list
+    GtkWidget *uninstalled_list_row; // Reference to the row in the uninstalled list
 } AppItem;
 
 // Structure to hold global application state
@@ -35,6 +36,9 @@ typedef struct {
     gchar *selected_device_id;        // The real device serial (e.g., "ABC12345")
     gchar *selected_manufacturer_id;  // The list to show (e.g., "Samsung")
     GList *app_list; // List of AppItem*
+    
+    GList *uninstalled_app_list; // List of uninstalled AppItem*
+    GtkWidget *uninstalled_list_box; // The UI list for uninstalled apps
 } AppState;
 
 // Global state instance
@@ -45,6 +49,8 @@ static void update_app_list(AppState *state);
 static void update_action_bar_visibility(AppState *state);
 static void populate_adb_devices(AppState *state);
 static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, AppState *state);
+static void on_reinstall_clicked(GtkButton *button, AppItem *item);
+static void add_row_to_uninstalled_list(AppState *state, AppItem *item);
 
 
 // --- PACKAGE DATA (Bloatware lists) ---
@@ -425,6 +431,98 @@ static void on_refresh_devices_clicked(GtkButton *button, AppState *state) {
 
 
 /**
+ * @brief Handler for the "Undo" (Reinstall) button click.
+ */
+static void on_reinstall_clicked(GtkButton *button, AppItem *item) {
+    // Use the global app_state to get the selected device ID
+    if (!app_state || !app_state->selected_device_id) {
+        g_printerr("Cannot reinstall: No ADB device selected.\n");
+        gtk_label_set_text(GTK_LABEL(app_state->status_label), "Error: Select ADB device to reinstall.");
+        return;
+    }
+
+    g_print("Attempting to reinstall: %s\n", item->package_name);
+    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE); // Disable button during op
+
+    gchar *stdout_str = NULL;
+    gchar *stderr_str = NULL;
+    gint exit_status;
+    GError *error = NULL;
+
+    // Use the 'cmd package install-existing' command
+    gchar *cmd_args[] = {
+        "adb",
+        "-s", app_state->selected_device_id,
+        "shell", 
+        "cmd", 
+        "package", 
+        "install-existing",
+        item->package_name,
+        NULL
+    };
+
+    g_spawn_sync(
+        NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
+        NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
+    );
+
+    gchar *stripped_output = stdout_str ? g_strstrip(stdout_str) : NULL;
+
+    if (error) {
+        g_printerr("Reinstall failed: %s\n", error->message);
+        g_error_free(error);
+    } else if (stripped_output && g_str_has_prefix(stripped_output, "Package")) {
+        // Success output is usually "Package com.example.app installed..."
+        g_print("Reinstall successful.\n");
+        
+        // Remove from UI
+        gtk_list_box_remove(GTK_LIST_BOX(app_state->uninstalled_list_box), item->uninstalled_list_row);
+        
+        // Remove from data list
+        app_state->uninstalled_app_list = g_list_remove(app_state->uninstalled_app_list, item);
+        
+        // Free the item data (it's no longer tracked)
+        app_item_free(item);
+        
+        // We don't need to re-enable the button, it's being destroyed.
+    } else {
+        g_printerr("Reinstall failed. STDOUT: %s, STDERR: %s\n", 
+            stdout_str ? stdout_str : "None", 
+            stderr_str ? stderr_str : "None");
+        gtk_widget_set_sensitive(GTK_WIDGET(button), TRUE); // Re-enable on failure
+    }
+
+    g_free(stdout_str);
+    g_free(stderr_str);
+}
+
+/**
+ * @brief Creates a new UI row in the "Recently Uninstalled" list.
+ */
+static void add_row_to_uninstalled_list(AppState *state, AppItem *item) {
+    GtkWidget *row = gtk_list_box_row_new();
+    GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    
+    GtkWidget *label = gtk_label_new(item->display_name);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+    gtk_widget_set_hexpand(label, TRUE);
+    
+    GtkWidget *reinstall_button = gtk_button_new_with_label("Undo");
+    gtk_widget_add_css_class(reinstall_button, "suggested-action");
+    g_signal_connect(reinstall_button, "clicked", G_CALLBACK(on_reinstall_clicked), item);
+
+    gtk_box_append(GTK_BOX(hbox), label);
+    gtk_box_append(GTK_BOX(hbox), reinstall_button);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), hbox);
+    
+    // Store a reference to the new row
+    item->uninstalled_list_row = row; 
+
+    gtk_list_box_append(GTK_LIST_BOX(state->uninstalled_list_box), row);
+}
+
+
+/**
  * @brief Handler for the Debloat button click. Executes the actual ADB uninstall command.
  */
 static void on_debloat_clicked(GtkButton *button, AppState *state) {
@@ -513,7 +611,7 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
                     success_count++;
                     // Mark for UI removal and cleanup
                     items_to_remove = g_list_append(items_to_remove, item);
-                    gtk_list_box_remove(GTK_LIST_BOX(state->app_list_box), item->row);
+                    gtk_list_box_remove(GTK_LIST_BOX(state->app_list_box), item->main_list_row);
                 } else {
                     failure_count++;
                 }
@@ -527,12 +625,21 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
         current_l = next_l; 
     }
 
-    // Remove successful items from the internal app_list state
+    // Move successful items from the main list to the uninstalled list
     GList *remove_l;
     for (remove_l = items_to_remove; remove_l != NULL; remove_l = remove_l->next) {
         AppItem *item = (AppItem *)remove_l->data;
+        
+        // 1. Remove from main app list
         state->app_list = g_list_remove(state->app_list, item);
-        app_item_free(item);
+        
+        // 2. Add to uninstalled data list
+        state->uninstalled_app_list = g_list_append(state->uninstalled_app_list, item);
+        
+        // 3. Add to uninstalled UI list
+        add_row_to_uninstalled_list(state, item);
+        
+        // 4. We DO NOT free the item
     }
     g_list_free(items_to_remove);
 
@@ -727,7 +834,7 @@ static void update_app_list(AppState *state) {
         gtk_list_box_append(GTK_LIST_BOX(state->app_list_box), row_widget);
 
         // Store reference and connect signal
-        item->row = row_widget;
+        item->main_list_row = row_widget;
         g_signal_connect(check, "toggled", G_CALLBACK(on_app_toggled), item);
 
         state->app_list = g_list_append(state->app_list, item);
@@ -748,6 +855,7 @@ static void activate(GtkApplication *app, AppState *state) {
     state->selected_device_id = NULL; // No device selected at start
     state->selected_manufacturer_id = g_strdup("Oppo"); // Default list to show
     state->app_list = NULL;
+    state->uninstalled_app_list = NULL; // ADD THIS
 
     // Create main window
     state->window = GTK_APPLICATION_WINDOW(gtk_application_window_new(app));
@@ -817,6 +925,24 @@ static void activate(GtkApplication *app, AppState *state) {
 
     gtk_box_append(GTK_BOX(left_box), device_scrolled);
 
+    // --- Recently Uninstalled List (NEW) ---
+    GtkWidget *uninstalled_header = gtk_label_new("Recently Uninstalled (Undo)");
+    gtk_widget_add_css_class(uninstalled_header, "title-4");
+    gtk_label_set_xalign(GTK_LABEL(uninstalled_header), 0.0);
+    gtk_widget_set_margin_top(uninstalled_header, 10);
+    gtk_box_append(GTK_BOX(left_box), uninstalled_header);
+
+    state->uninstalled_list_box = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->uninstalled_list_box), GTK_SELECTION_NONE);
+
+    GtkWidget *uninstalled_scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(uninstalled_scrolled), state->uninstalled_list_box);
+    // Give it a minimum height and allow it to expand
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(uninstalled_scrolled), 100);
+    gtk_widget_set_vexpand(uninstalled_scrolled, TRUE);
+
+    gtk_box_append(GTK_BOX(left_box), uninstalled_scrolled);
+
 
     gtk_paned_set_start_child(GTK_PANED(paned), left_box);
     gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE); 
@@ -846,9 +972,11 @@ static void activate(GtkApplication *app, AppState *state) {
     state->status_label = gtk_label_new("Select a device and then select apps to debloat.");
     gtk_action_bar_pack_start(GTK_ACTION_BAR(state->action_bar), state->status_label);
 
-    state->debloat_button = gtk_button_new_with_label("DEBLOAT SELECTED APPS");
+    state->debloat_button = gtk_button_new_with_label("Remove");
+    gtk_widget_set_tooltip_text(state->debloat_button, "Uninstall selected apps from the device");
     gtk_widget_add_css_class(state->debloat_button, "destructive-action");
     gtk_action_bar_pack_end(GTK_ACTION_BAR(state->action_bar), state->debloat_button);
+    
     g_signal_connect(state->debloat_button, "clicked", G_CALLBACK(on_debloat_clicked), state);
 
     // Combine right content and action bar
@@ -859,7 +987,7 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_paned_set_end_child(GTK_PANED(paned), right_container);
 
     // Set initial paned position 
-    gtk_paned_set_position(GTK_PANED(paned), 280); 
+    gtk_paned_set_position(GTK_PANED(paned), 320); // Increased left panel size
 
     // Load initial device list (which auto-selects and loads the app list)
     update_device_list(state);
@@ -882,6 +1010,9 @@ static void on_shutdown(GtkApplication *app, gpointer user_data) {
     }
     if (app_state->device_model) {
         g_object_unref(app_state->device_model);
+    }
+    if (app_state->uninstalled_app_list) {
+        g_list_free_full(app_state->uninstalled_app_list, (GDestroyNotify)app_item_free);
     }
     if (app_state->app_list) {
         g_list_free_full(app_state->app_list, (GDestroyNotify)app_item_free);
