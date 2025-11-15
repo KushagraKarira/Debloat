@@ -1,4 +1,5 @@
 #include <gtk/gtk.h>
+#include <adwaita.h> // <-- ADD THIS
 #include <glib/glist.h>
 #include <gio/gio.h>
 #include <sys/wait.h> // Required for WEXITSTATUS
@@ -22,7 +23,7 @@ typedef struct {
 
 // Structure to hold global application state
 typedef struct {
-    GtkApplicationWindow *window;
+    AdwApplicationWindow *window; // <-- CHANGED
     GtkWidget *device_list_box;
     GtkWidget *app_list_box;
     GtkWidget *action_bar;
@@ -51,10 +52,14 @@ static void populate_adb_devices(AppState *state);
 static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, AppState *state);
 static void on_reinstall_clicked(GtkButton *button, AppItem *item);
 static void add_row_to_uninstalled_list(AppState *state, AppItem *item);
+static void on_about_clicked(GtkButton *button, GtkWindow *parent); // <-- CHANGED
 
 
 // --- PACKAGE DATA (Bloatware lists) ---
-// Note: Mock Fail entries have been removed as we are now using real command execution.
+// (Lists are unchanged, snipped for brevity)
+// ...
+// ... (SAMSUNG_APPS, XIAOMI_APPS, VIVO_APPS, etc.)
+// ...
 
 static const PackageEntry SAMSUNG_APPS[] = {
     {"Samsung Message", "com.samsung.android.messaging"},
@@ -256,38 +261,27 @@ static void update_action_bar_visibility(AppState *state) {
 // --- CALLBACKS ---
 
 /**
- * @brief Handler for the About button.
+ * @brief Handler for the About button. (FIXED: Uses AdwAboutDialog correctly)
  */
-static void on_about_clicked(GtkButton *button, GtkApplicationWindow *parent) {
-    GtkWidget *dialog = gtk_about_dialog_new();
-
-    gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(dialog), "Android Debloater");
-    gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(dialog), "0.6");
-    gtk_about_dialog_set_copyright(GTK_ABOUT_DIALOG(dialog), "© 2025 Kushagra Karira");
+static void on_about_clicked(GtkButton *button, GtkWindow *parent) {
     
-    const gchar *comments[] = {
-        "A GTK4 application for debloating Android devices using ADB. Requires ADB installed and a connected device.",
-        NULL
-    };
-    gtk_about_dialog_set_comments(GTK_ABOUT_DIALOG(dialog), comments[0]);
-
-    const gchar *authors[] = {
-        "Kushagra Karira",
-        NULL
-    };
-    gtk_about_dialog_set_authors(GTK_ABOUT_DIALOG(dialog), authors);
-
-    // Set Website/Project Link
-    gtk_about_dialog_set_website(GTK_ABOUT_DIALOG(dialog), "https://kushagrakarira.com");
-    gtk_about_dialog_set_website_label(GTK_ABOUT_DIALOG(dialog), "kushagrakarira.com");
-    gtk_about_dialog_set_license(GTK_ABOUT_DIALOG(dialog), 
-        "Project Link: https://github.com/KushagraKarira/Debloat");
-    gtk_about_dialog_set_license_type(GTK_ABOUT_DIALOG(dialog), GTK_LICENSE_CUSTOM);
-
-    gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(parent));
-    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    // adw_about_dialog_new() returns the AdwDialog parent type
+    AdwDialog *dialog = adw_about_dialog_new();
     
-    gtk_window_present(GTK_WINDOW(dialog));
+    // Cast to AdwAboutDialog* to set its specific properties
+    adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(dialog), "Android Debloater");
+    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(dialog), "0.7 (Libadwaita)");
+    adw_about_dialog_set_developer_name(ADW_ABOUT_DIALOG(dialog), "Kushagra Karira");
+    adw_about_dialog_set_copyright(ADW_ABOUT_DIALOG(dialog), "© 2025 Kushagra Karira");
+    adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(dialog), "A GTK4/Libadwaita application for debloating Android devices using ADB.");
+    adw_about_dialog_set_website(ADW_ABOUT_DIALOG(dialog), "https://kushagrakarira.com");
+    adw_about_dialog_set_issue_url(ADW_ABOUT_DIALOG(dialog), "https://github.com/KushagraKarira/Debloat/issues");
+    adw_about_dialog_add_link(ADW_ABOUT_DIALOG(dialog), "Project Link", "https://github.com/KushagraKarira/Debloat");
+    
+    // This is the correct way to show the dialog.
+    // It automatically handles modality and being "transient for" the parent.
+    // Cast the parent GtkWindow to a GtkWidget
+    adw_dialog_present(dialog, GTK_WIDGET(parent));
 }
 
 /**
@@ -855,37 +849,50 @@ static void activate(GtkApplication *app, AppState *state) {
     state->selected_device_id = NULL; // No device selected at start
     state->selected_manufacturer_id = g_strdup("Oppo"); // Default list to show
     state->app_list = NULL;
-    state->uninstalled_app_list = NULL; // ADD THIS
+    state->uninstalled_app_list = NULL; 
 
     // Create main window
-    state->window = GTK_APPLICATION_WINDOW(gtk_application_window_new(app));
-    gtk_window_set_title(GTK_WINDOW(state->window), "Android Debloat Manager (GTK4/C)");
+    state->window = ADW_APPLICATION_WINDOW(adw_application_window_new(GTK_APPLICATION(app)));
+    gtk_window_set_title(GTK_WINDOW(state->window), "Android Debloater");
     gtk_window_set_default_size(GTK_WINDOW(state->window), 900, 600);
 
-    // --- HEADER BAR with About Button ---
-    GtkWidget *header_bar = gtk_header_bar_new();
-    gtk_window_set_titlebar(GTK_WINDOW(state->window), header_bar);
+    // --- Main Vertical Box (Header + Stack) ---
+    GtkWidget *main_content_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    adw_application_window_set_content(state->window, main_content_box);
+
+    // --- HEADER BAR with StackSwitcher and About Button ---
+    GtkWidget *header_bar = adw_header_bar_new();
+    gtk_box_append(GTK_BOX(main_content_box), header_bar);
+
+    GtkWidget *stack_switcher = gtk_stack_switcher_new();
+    adw_header_bar_set_title_widget(ADW_HEADER_BAR(header_bar), stack_switcher);
 
     GtkWidget *about_button = gtk_button_new_from_icon_name("help-about-symbolic");
-    gtk_header_bar_pack_end(GTK_HEADER_BAR(header_bar), about_button);
-    g_signal_connect(about_button, "clicked", G_CALLBACK(on_about_clicked), state->window);
+    adw_header_bar_pack_end(ADW_HEADER_BAR(header_bar), about_button);
+    g_signal_connect(about_button, "clicked", G_CALLBACK(on_about_clicked), GTK_WINDOW(state->window));
 
-    // Main layout: Paned window
+    // --- Main Stack (Debloat Page, Undo Page) ---
+    GtkWidget *stack = gtk_stack_new();
+    gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(stack_switcher), GTK_STACK(stack));
+    gtk_box_append(GTK_BOX(main_content_box), stack);
+
+
+    // --- PAGE 1: DEBLOAT (Paned Layout) ---
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
-    gtk_window_set_child(GTK_WINDOW(state->window), paned);
+    gtk_stack_add_titled(GTK_STACK(stack), paned, "debloat", "Debloat");
 
-    // --- LEFT PANE (Device Selection, 20%) ---
+    // --- LEFT PANE (Device Selection) ---
     GtkWidget *left_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_widget_set_margin_start(left_box, 10);
     gtk_widget_set_margin_end(left_box, 10);
     gtk_widget_set_margin_top(left_box, 10);
     gtk_widget_set_margin_bottom(left_box, 10);
 
-    // --- ADB Device Selector (NEW) ---
+    // --- ADB Device Selector ---
     GtkWidget *adb_header = gtk_label_new("Select Connected Device");
     gtk_widget_add_css_class(adb_header, "title-4");
     gtk_label_set_xalign(GTK_LABEL(adb_header), 0.0);
-    gtk_box_append(GTK_BOX(left_box), adb_header);
+    gtk_box_append(GTK_BOX(left_box), adb_header); // <-- TYPO FIX
 
     GtkWidget *adb_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_append(GTK_BOX(left_box), adb_hbox);
@@ -905,7 +912,7 @@ static void activate(GtkApplication *app, AppState *state) {
     g_signal_connect(refresh_button, "clicked", G_CALLBACK(on_refresh_devices_clicked), state);
     gtk_box_append(GTK_BOX(adb_hbox), refresh_button);
 
-    // --- Manufacturer List (MODIFIED) ---
+    // --- Manufacturer List ---
     GtkWidget *device_header = gtk_label_new("Select Manufacturer List"); // Title changed
     gtk_widget_add_css_class(device_header, "title-4");
     gtk_label_set_xalign(GTK_LABEL(device_header), 0.0);
@@ -924,32 +931,13 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_widget_set_vexpand(state->device_list_box, TRUE);
 
     gtk_box_append(GTK_BOX(left_box), device_scrolled);
-
-    // --- Recently Uninstalled List (NEW) ---
-    GtkWidget *uninstalled_header = gtk_label_new("Recently Uninstalled (Undo)");
-    gtk_widget_add_css_class(uninstalled_header, "title-4");
-    gtk_label_set_xalign(GTK_LABEL(uninstalled_header), 0.0);
-    gtk_widget_set_margin_top(uninstalled_header, 10);
-    gtk_box_append(GTK_BOX(left_box), uninstalled_header);
-
-    state->uninstalled_list_box = gtk_list_box_new();
-    gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->uninstalled_list_box), GTK_SELECTION_NONE);
-
-    GtkWidget *uninstalled_scrolled = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(uninstalled_scrolled), state->uninstalled_list_box);
-    // Give it a minimum height and allow it to expand
-    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(uninstalled_scrolled), 100);
-    gtk_widget_set_vexpand(uninstalled_scrolled, TRUE);
-
-    gtk_box_append(GTK_BOX(left_box), uninstalled_scrolled);
-
-
+    
+    // Add left_box to paned
     gtk_paned_set_start_child(GTK_PANED(paned), left_box);
     gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE); 
     gtk_paned_set_shrink_start_child(GTK_PANED(paned), FALSE);
 
-
-    // --- RIGHT PANE (App List, 80%) ---
+    // --- RIGHT PANE (App List) ---
     GtkWidget *right_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     GtkWidget *app_header = gtk_label_new("Installed User/System Apps (Select to Debloat)");
     gtk_widget_add_css_class(app_header, "title-4");
@@ -972,11 +960,10 @@ static void activate(GtkApplication *app, AppState *state) {
     state->status_label = gtk_label_new("Select a device and then select apps to debloat.");
     gtk_action_bar_pack_start(GTK_ACTION_BAR(state->action_bar), state->status_label);
 
-    state->debloat_button = gtk_button_new_with_label("Remove");
+    state->debloat_button = gtk_button_new_with_label("Remove"); // <-- CHANGED
     gtk_widget_set_tooltip_text(state->debloat_button, "Uninstall selected apps from the device");
     gtk_widget_add_css_class(state->debloat_button, "destructive-action");
     gtk_action_bar_pack_end(GTK_ACTION_BAR(state->action_bar), state->debloat_button);
-    
     g_signal_connect(state->debloat_button, "clicked", G_CALLBACK(on_debloat_clicked), state);
 
     // Combine right content and action bar
@@ -987,7 +974,36 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_paned_set_end_child(GTK_PANED(paned), right_container);
 
     // Set initial paned position 
-    gtk_paned_set_position(GTK_PANED(paned), 320); // Increased left panel size
+    gtk_paned_set_position(GTK_PANED(paned), 320); 
+
+
+    // --- PAGE 2: UNDO ---
+    GtkWidget *undo_page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_widget_set_margin_start(undo_page_box, 10);
+    gtk_widget_set_margin_end(undo_page_box, 10);
+    gtk_widget_set_margin_top(undo_page_box, 10);
+    gtk_widget_set_margin_bottom(undo_page_box, 10);
+    
+    // Add "Undo" page to the stack
+    gtk_stack_add_titled(GTK_STACK(stack), undo_page_box, "undo", "Undo");
+
+    GtkWidget *uninstalled_header = gtk_label_new("Recently Uninstalled (Undo)");
+    gtk_widget_add_css_class(uninstalled_header, "title-4");
+    gtk_label_set_xalign(GTK_LABEL(uninstalled_header), 0.0);
+    gtk_widget_set_margin_top(uninstalled_header, 10);
+    gtk_box_append(GTK_BOX(undo_page_box), uninstalled_header);
+
+    state->uninstalled_list_box = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->uninstalled_list_box), GTK_SELECTION_NONE);
+
+    GtkWidget *uninstalled_scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(uninstalled_scrolled), state->uninstalled_list_box);
+    gtk_widget_set_vexpand(uninstalled_scrolled, TRUE);
+
+    gtk_box_append(GTK_BOX(undo_page_box), uninstalled_scrolled);
+
+
+    // --- FINAL SETUP ---
 
     // Load initial device list (which auto-selects and loads the app list)
     update_device_list(state);
@@ -1023,13 +1039,13 @@ static void on_shutdown(GtkApplication *app, gpointer user_data) {
 // --- MAIN FUNCTION ---
 
 int main(int argc, char **argv) {
-    GtkApplication *app;
+    AdwApplication *app; // <-- CHANGED
     int status;
 
     // Allocate and initialize global state
     app_state = g_new0(AppState, 1);
 
-    app = gtk_application_new("com.gemini.debloater", G_APPLICATION_DEFAULT_FLAGS);
+    app = adw_application_new("com.gemini.debloater", G_APPLICATION_DEFAULT_FLAGS); // <-- CHANGED
     
     // Connect signals
     g_signal_connect(app, "activate", G_CALLBACK(activate), app_state);
