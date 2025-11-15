@@ -17,11 +17,11 @@ Been a long due, feel free to open issues for suggestions.
 
 ### ToDo
 - [x] GUI Version
-- [ ] Add more devices and apps
+- [x] Add more devices and apps
 - [x] Github Automated Release
 - [ ] Appimage
 - [ ] MacOS and Windows support
-- [ ] UNDO changes
+- [x] UNDO changes
 - [ ] Search and Install apps
 
 ## Screenshots
