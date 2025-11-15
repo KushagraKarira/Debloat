@@ -27,7 +27,7 @@ jobs:
 
     - name: Compile
       run: |
-        gcc -o debloater GTK4/app.c $(pkg-config --cflags --libs gtk4)
+        gcc -o debloater app.c $(pkg-config --cflags --libs gtk4)
 
     - name: Create Release and Upload Asset
       uses: softprops/action-gh-release@v1
