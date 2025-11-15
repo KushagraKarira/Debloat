@@ -53,6 +53,7 @@ static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, App
 static void on_reinstall_clicked(GtkButton *button, AppItem *item);
 static void add_row_to_uninstalled_list(AppState *state, AppItem *item);
 static void on_about_clicked(GtkButton *button, GtkWindow *parent); // <-- CHANGED
+static void show_welcome_dialog(GtkWindow *parent); // <-- NEW
 
 
 // --- PACKAGE DATA (Bloatware lists) ---
@@ -261,6 +262,61 @@ static void update_action_bar_visibility(AppState *state) {
 // --- CALLBACKS ---
 
 /**
+ * @brief Shows the welcome/help dialog. (NEW)
+ */
+static void show_welcome_dialog(GtkWindow *parent) {
+    // FIX 1: The 'new' function returns the parent AdwDialog type.
+    AdwDialog *dialog = adw_alert_dialog_new(
+        "Welcome to Android Debloater!",
+        NULL // No body text, we use a custom view
+    );
+
+    // Create a custom view for the dialog body
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 15);
+    gtk_widget_set_margin_start(box, 12);
+    gtk_widget_set_margin_end(box, 12);
+    gtk_widget_set_margin_top(box, 12);
+
+    // --- Instructions ---
+    const gchar *instructions = 
+        "To use this tool, you must enable **USB Debugging (ADB)** on your device.\n\n"
+        "1.  Go to **Settings** > **About Phone**.\n"
+        "2.  Tap on **Build Number** 7 times until you see 'You are now a developer!'.\n"
+        "3.  Go back to **Settings** > **System** > **Developer options**.\n"
+        "4.  Find and turn on **USB debugging**.\n"
+        "5.  Connect your phone to your computer via USB.\n"
+        "6.  A prompt will appear on your phone: 'Allow USB debugging?'. Check 'Always allow' and tap **OK**.";
+
+    GtkWidget *label = gtk_label_new(instructions);
+    gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+    gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
+    gtk_box_append(GTK_BOX(box), label);
+
+    // Set the custom view as the "extra child"
+    // FIX 2: Cast to ADW_ALERT_DIALOG for specific functions
+    adw_alert_dialog_set_extra_child(ADW_ALERT_DIALOG(dialog), box);
+
+    // FIX 2: Cast to ADW_ALERT_DIALOG for specific functions
+    adw_alert_dialog_add_response(ADW_ALERT_DIALOG(dialog), "ok", "OK");
+    
+    // FIX 2: Cast to ADW_ALERT_DIALOG for specific functions
+    adw_alert_dialog_set_default_response(ADW_ALERT_DIALOG(dialog), "ok");
+    
+    // Connect to the "response" signal to automatically destroy the dialog
+    // g_signal_connect(dialog, "response", G_CALLBACK(gtk_window_destroy), NULL); // Not needed for AdwAlertDialog
+
+    // FIX 4: Use 'adw_alert_dialog_choose' (as suggested by compiler)
+    // This shows the dialog. We pass NULL for the callback because we don't
+    //
+    // FIX 5: Cast the GtkWindow* parent to GtkWidget*
+    // FIX 6: Pass the AdwDialog* directly
+    // FIX 7: Cast the AdwDialog* to AdwAlertDialog* for the function
+    adw_alert_dialog_choose(ADW_ALERT_DIALOG(dialog), GTK_WIDGET(parent), NULL, NULL, NULL);
+}
+
+
+/**
  * @brief Handler for the About button. (FIXED: Uses AdwAboutDialog correctly)
  */
 static void on_about_clicked(GtkButton *button, GtkWindow *parent) {
@@ -274,9 +330,9 @@ static void on_about_clicked(GtkButton *button, GtkWindow *parent) {
     adw_about_dialog_set_developer_name(ADW_ABOUT_DIALOG(dialog), "Kushagra Karira");
     adw_about_dialog_set_copyright(ADW_ABOUT_DIALOG(dialog), "© 2025 Kushagra Karira");
     adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(dialog), "A GTK4/Libadwaita application for debloating Android devices using ADB.");
-    adw_about_dialog_set_website(ADW_ABOUT_DIALOG(dialog), "https://kushagrakarira.com");
-    adw_about_dialog_set_issue_url(ADW_ABOUT_DIALOG(dialog), "https://github.com/KushagraKarira/Debloat/issues");
-    adw_about_dialog_add_link(ADW_ABOUT_DIALOG(dialog), "Project Link", "https://github.com/KushagraKarira/Debloat");
+    adw_about_dialog_set_website(ADW_ABOUT_DIALOG(dialog), "https.kushagrakarira.com");
+    adw_about_dialog_set_issue_url(ADW_ABOUT_DIALOG(dialog), "https.github.com/KushagraKarira/Debloat/issues");
+    adw_about_dialog_add_link(ADW_ABOUT_DIALOG(dialog), "Project Link", "https.github.com/KushagraKarira/Debloat");
     
     // This is the correct way to show the dialog.
     // It automatically handles modality and being "transient for" the parent.
@@ -1011,7 +1067,11 @@ static void activate(GtkApplication *app, AppState *state) {
     // Populate ADB devices at startup
     populate_adb_devices(state);
 
+    // Show the main window
     gtk_window_present(GTK_WINDOW(state->window));
+    
+    // Show the welcome dialog on top of the main window (NEW)
+    show_welcome_dialog(GTK_WINDOW(state->window));
 }
 
 /**
@@ -1045,7 +1105,7 @@ int main(int argc, char **argv) {
     // Allocate and initialize global state
     app_state = g_new0(AppState, 1);
 
-    app = adw_application_new("com.gemini.debloater", G_APPLICATION_DEFAULT_FLAGS); // <-- CHANGED
+    app = adw_application_new("com.kushagrakarira.debloater", G_APPLICATION_DEFAULT_FLAGS); // <-- CHANGED
     
     // Connect signals
     g_signal_connect(app, "activate", G_CALLBACK(activate), app_state);
