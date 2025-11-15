@@ -6,7 +6,7 @@ on:
       tag_name:
         description: 'Tag name for release (e.g. v1.0.0)'
         required: true
-        default: 'v1.0.0'
+        default: '1.0'
 
 # Permission needed to create releases
 permissions:
@@ -27,7 +27,7 @@ jobs:
 
     - name: Compile
       run: |
-        gcc -o debloater app.c $(pkg-config --cflags --libs gtk4)
+        gcc app.c -o debloater $(pkg-config --cflags --libs gtk4 libadwaita-1)
 
     - name: Create Release and Upload Asset
       uses: softprops/action-gh-release@v1
