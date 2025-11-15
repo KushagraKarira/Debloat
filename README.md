@@ -27,9 +27,5 @@ Been a long due, feel free to open issues for suggestions.
 ## Screenshots
 <img src=Screenshot.png>
 
-> [!WARNING]
-> Function of many OEM apps are unknown and are added here based on user response from the internet.
-> No contributor may be held liable for the loss of data from using this application.
-
 ## Contributors
 ![GitHub Contributors Image](https://contrib.rocks/image?repo=kushagrakarira/Debloat)
