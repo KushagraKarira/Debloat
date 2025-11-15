@@ -33,13 +33,6 @@ typedef struct {
     // New widgets for real ADB device selection
     GtkWidget *device_dropdown;
     GtkStringList *device_model;
-    
-    // NEW: Widget for wireless ADB
-    GtkWidget *wireless_ip_entry;
-
-    // NEW: Widgets for Debug Page
-    GtkWidget *debug_command_entry;
-    GtkTextBuffer *debug_output_buffer;
 
     gchar *selected_device_id;        // The real device serial (e.g., "ABC12345")
     gchar *selected_manufacturer_id;  // The list to show (e.g., "Samsung")
@@ -47,6 +40,14 @@ typedef struct {
     
     GList *uninstalled_app_list; // List of uninstalled AppItem*
     GtkWidget *uninstalled_list_box; // The UI list for uninstalled apps
+
+    // NEW: Widget for device status
+    GtkWidget *device_status_label;
+
+    // NEW: Widgets for Debug Page
+    GtkWidget *debug_command_entry;
+    GtkTextBuffer *debug_output_buffer;
+
 } AppState;
 
 // Global state instance
@@ -61,8 +62,8 @@ static void on_reinstall_clicked(GtkButton *button, AppItem *item);
 static void add_row_to_uninstalled_list(AppState *state, AppItem *item);
 static void on_about_clicked(GtkButton *button, GtkWindow *parent); // <-- CHANGED
 static void show_welcome_dialog(GtkWindow *parent); // <-- NEW
-static void on_connect_wireless_clicked(GtkButton *button, AppState *state); // <-- NEW
 static void on_run_debug_command_clicked(GtkButton *button, AppState *state); // <-- NEW
+static void on_refresh_devices_clicked(GtkButton *button, AppState *state); // <-- NEW
 
 
 // --- PACKAGE DATA (Bloatware lists) ---
@@ -263,30 +264,40 @@ static void update_action_bar_visibility(AppState *state) {
         g_free(label_text);
         gtk_widget_set_sensitive(state->debloat_button, TRUE);
     } 
-    else {
+    else if (state->selected_device_id == NULL) {
         gtk_widget_set_visible(state->action_bar, FALSE);
+        // This message is now handled by the device_status_label
+    }
+    else {
+        // Device is selected, but no apps are checked
+        gtk_widget_set_visible(state->action_bar, TRUE); // Show the bar
+        gtk_label_set_text(GTK_LABEL(state->status_label), "Select apps from the list to remove.");
+        gtk_widget_set_sensitive(state->debloat_button, FALSE); // Keep button disabled
     }
 }
 
 // --- CALLBACKS ---
 
 /**
- * @brief Shows the welcome/help dialog. (NEW)
+ * @brief (NEW) Shows a welcome/guide dialog on how to enable ADB.
+ * Uses AdwAlertDialog, which is the modern approach.
  */
 static void show_welcome_dialog(GtkWindow *parent) {
-    // FIX 1: The 'new' function returns the parent AdwDialog type.
     AdwDialog *dialog = adw_alert_dialog_new(
         "Welcome to Android Debloater!",
-        NULL // No body text, we use a custom view
+        NULL
     );
 
-    // Create a custom view for the dialog body
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 15);
+    adw_alert_dialog_add_response(ADW_ALERT_DIALOG(dialog), "ok", "Got it!");
+    adw_alert_dialog_set_default_response(ADW_ALERT_DIALOG(dialog), "ok");
+
+    // Create a box to hold the instructions
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_set_margin_start(box, 12);
     gtk_widget_set_margin_end(box, 12);
     gtk_widget_set_margin_top(box, 12);
+    gtk_widget_set_margin_bottom(box, 12);
 
-    // --- Instructions ---
     const gchar *instructions = 
         "To use this tool, you must enable **USB Debugging (ADB)** on your device.\n\n"
         "**Wired Connection:**\n"
@@ -295,37 +306,18 @@ static void show_welcome_dialog(GtkWindow *parent) {
         "3.  Go back to **Settings** > **System** > **Developer options**.\n"
         "4.  Find and turn on **USB debugging**.\n"
         "5.  Connect your phone to your computer via USB.\n"
-        "6.  A prompt will appear on your phone: 'Allow USB debugging?'. Check 'Always allow' and tap **OK**."
-        "\n\n**Wireless Connection (Optional):**\n"
-        "1.  In **Developer options**, enable **Wireless debugging**.\n"
-        "2.  Tap 'Wireless debugging' (the text, not the switch) to see your device's **IP Address & Port** (e.g., 192.168.1.5:45555).\n"
-        "3.  Enter this IP and Port into the 'Connect Wireless Device' box in the app and click 'Connect'.";
+        "6.  A prompt will appear on your phone: 'Allow USB debugging?'. Check 'Always allow' and tap **OK**.";
 
     GtkWidget *label = gtk_label_new(instructions);
+    gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
     gtk_label_set_xalign(GTK_LABEL(label), 0.0);
-    gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
     gtk_box_append(GTK_BOX(box), label);
 
-    // Set the custom view as the "extra child"
-    // FIX 2: Cast to ADW_ALERT_DIALOG for specific functions
     adw_alert_dialog_set_extra_child(ADW_ALERT_DIALOG(dialog), box);
 
-    // FIX 2: Cast to ADW_ALERT_DIALOG for specific functions
-    adw_alert_dialog_add_response(ADW_ALERT_DIALOG(dialog), "ok", "OK");
-    
-    // FIX 2: Cast to ADW_ALERT_DIALOG for specific functions
-    adw_alert_dialog_set_default_response(ADW_ALERT_DIALOG(dialog), "ok");
-    
-    // Connect to the "response" signal to automatically destroy the dialog
-    // g_signal_connect(dialog, "response", G_CALLBACK(gtk_window_destroy), NULL); // Not needed for AdwAlertDialog
-
-    // FIX 4: Use 'adw_alert_dialog_choose' (as suggested by compiler)
-    // This shows the dialog. We pass NULL for the callback because we don't
-    //
-    // FIX 5: Cast the GtkWindow* parent to GtkWidget*
-    // FIX 6: Pass the AdwDialog* directly
-    // FIX 7: Cast the AdwDialog* to AdwAlertDialog* for the function
+    // Show the dialog
+    // We cast parent to GtkWidget* as required by the function
     adw_alert_dialog_choose(ADW_ALERT_DIALOG(dialog), GTK_WIDGET(parent), NULL, NULL, NULL);
 }
 
@@ -344,9 +336,9 @@ static void on_about_clicked(GtkButton *button, GtkWindow *parent) {
     adw_about_dialog_set_developer_name(ADW_ABOUT_DIALOG(dialog), "Kushagra Karira");
     adw_about_dialog_set_copyright(ADW_ABOUT_DIALOG(dialog), "© 2025 Kushagra Karira");
     adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(dialog), "A GTK4/Libadwaita application for debloating Android devices using ADB.");
-    adw_about_dialog_set_website(ADW_ABOUT_DIALOG(dialog), "https.kushagrakarira.com");
-    adw_about_dialog_set_issue_url(ADW_ABOUT_DIALOG(dialog), "https.github.com/KushagraKarira/Debloat/issues");
-    adw_about_dialog_add_link(ADW_ABOUT_DIALOG(dialog), "Project Link", "https.github.com/KushagraKarira/Debloat");
+    adw_about_dialog_set_website(ADW_ABOUT_DIALOG(dialog), "https://kushagrakarira.com");
+    adw_about_dialog_set_issue_url(ADW_ABOUT_DIALOG(dialog), "https://github.com/KushagraKarira/Debloat/issues");
+    adw_about_dialog_add_link(ADW_ABOUT_DIALOG(dialog), "Project Link", "https://github.com/KushagraKarira/Debloat");
     
     // This is the correct way to show the dialog.
     // It automatically handles modality and being "transient for" the parent.
@@ -396,8 +388,10 @@ static void populate_adb_devices(AppState *state) {
     gint exit_status;
     GError *error = NULL;
     gchar *cmd_args[] = {"adb", "devices", NULL};
+    gint devices_found = 0;
 
     g_print("Running: adb devices\n");
+    gtk_label_set_text(GTK_LABEL(state->device_status_label), "Refreshing device list...");
 
     // --- START FIX V3 ---
     // Clear the existing list, but keep the placeholder at index 0
@@ -423,7 +417,7 @@ static void populate_adb_devices(AppState *state) {
 
     if (error) {
         g_printerr("Failed to execute 'adb': %s. Is it in your PATH?\n", error->message);
-        gtk_label_set_text(GTK_LABEL(state->status_label), "Error: 'adb' command not found.");
+        gtk_label_set_text(GTK_LABEL(state->device_status_label), "Error: 'adb' command not found.");
         g_error_free(error);
         g_free(stdout_str);
         g_free(stderr_str);
@@ -451,6 +445,7 @@ static void populate_adb_devices(AppState *state) {
                 if (g_strcmp0(device_state, "device") == 0) {
                     g_print("Found device: %s\n", device_id);
                     gtk_string_list_append(state->device_model, device_id);
+                    devices_found++;
                 }
             }
             g_strfreev(parts);
@@ -458,13 +453,23 @@ static void populate_adb_devices(AppState *state) {
         g_strfreev(lines);
     }
     
+    // Update status label
+    gchar *status_msg;
+    if (devices_found > 0) {
+        status_msg = g_strdup_printf("Found %d device(s). Select one to begin.", devices_found);
+    } else {
+        status_msg = g_strdup("No devices found. Connect one and refresh.");
+    }
+    gtk_label_set_text(GTK_LABEL(state->device_status_label), status_msg);
+    g_free(status_msg);
+
     g_free(stdout_str);
     g_free(stderr_str);
     update_action_bar_visibility(state);
 }
 
 /**
- * @brief Handler for when a device is selected from the ADB dropdown.
+ * @brief Handler for when a device is selected from the ADB dropdown. (FIXED: Added missing function)
  */
 static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, AppState *state) {
     guint pos = gtk_drop_down_get_selected(dropdown);
@@ -479,6 +484,7 @@ static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, App
         const gchar *device_id = gtk_string_list_get_string(state->device_model, pos);
         state->selected_device_id = g_strdup(device_id);
         g_print("ADB device selected: %s\n", state->selected_device_id);
+        gtk_label_set_text(GTK_LABEL(state->device_status_label), ""); // Clear status
     } else {
         g_print("No ADB device selected.\n");
     }
@@ -486,163 +492,12 @@ static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, App
     update_action_bar_visibility(state);
 }
 
+
 /**
- * @brief Simple callback to refresh the ADB device list.
+ * @brief Simple callback to refresh the ADB device list. (FIXED: Added missing function)
  */
 static void on_refresh_devices_clicked(GtkButton *button, AppState *state) {
     populate_adb_devices(state);
-}
-
-
-/**
- * @brief Handler for the "Connect" button for wireless ADB. (NEW)
- */
-static void on_connect_wireless_clicked(GtkButton *button, AppState *state) {
-    const gchar *ip_address = gtk_editable_get_text(GTK_EDITABLE(state->wireless_ip_entry));
-    if (!ip_address || *ip_address == '\0') {
-        gtk_label_set_text(GTK_LABEL(state->status_label), "Please enter an IP address and port.");
-        return;
-    }
-
-    g_print("Attempting to connect to: %s\n", ip_address);
-    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE); // Disable button during op
-
-    gchar *stdout_str = NULL;
-    gchar *stderr_str = NULL;
-    gint exit_status;
-    GError *error = NULL;
-    
-    // We must cast the const gchar* from the entry to gchar* for the array
-    gchar *cmd_args[] = {"adb", "connect", (gchar *)ip_address, NULL};
-
-    g_spawn_sync(
-        NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
-        NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
-    );
-
-    gchar *msg;
-    if (error) {
-        msg = g_strdup_printf("Failed to run 'adb connect': %s", error->message);
-        g_error_free(error);
-    } else {
-        gchar *stripped_out = stdout_str ? g_strstrip(stdout_str) : "No output";
-        gchar *stripped_err = stderr_str ? g_strstrip(stderr_str) : "No output";
-
-        // Check for success strings
-        if (g_str_has_prefix(stripped_out, "connected to") || g_str_has_prefix(stripped_out, "already connected to")) {
-            msg = g_strdup_printf("Successfully connected to %s", ip_address);
-            // Clear the entry on success
-            gtk_editable_set_text(GTK_EDITABLE(state->wireless_ip_entry), "");
-        } else {
-            msg = g_strdup_printf("Failed: %s / %s", stripped_out, stripped_err);
-        }
-    }
-
-    gtk_label_set_text(GTK_LABEL(state->status_label), msg);
-    g_free(msg);
-    gtk_widget_set_sensitive(GTK_WIDGET(button), TRUE); // Re-enable button
-
-    // ALWAYS refresh the device list after attempting a connect
-    populate_adb_devices(state);
-
-    g_free(stdout_str);
-    g_free(stderr_str);
-}
-
-
-/**
- * @brief Handler for the "Run" button on the Debug page. (NEW)
- */
-static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
-    const gchar *command_text = gtk_editable_get_text(GTK_EDITABLE(state->debug_command_entry));
-    
-    // Clear output buffer
-    gtk_text_buffer_set_text(state->debug_output_buffer, "", -1);
-
-    if (!state->selected_device_id) {
-        gtk_text_buffer_set_text(state->debug_output_buffer, "Error: No ADB device selected.", -1);
-        return;
-    }
-    if (!command_text || *command_text == '\0') {
-        gtk_text_buffer_set_text(state->debug_output_buffer, "Error: No command entered.", -1);
-        return;
-    }
-
-    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
-
-    // Split the user's command string
-    gchar **user_args = g_strsplit(command_text, " ", -1);
-    guint user_args_len = g_strv_length(user_args);
-
-    // Create the full argument vector: "adb", "-s", device_id, "shell", [user_args...], NULL
-    guint full_args_len = 4 + user_args_len;
-    gchar **cmd_args = g_new(gchar*, full_args_len + 1); // +1 for NULL terminator
-
-    cmd_args[0] = g_strdup("adb");
-    cmd_args[1] = g_strdup("-s");
-    cmd_args[2] = g_strdup(state->selected_device_id);
-    cmd_args[3] = g_strdup("shell");
-
-    for (guint i = 0; i < user_args_len; i++) {
-        cmd_args[4 + i] = g_strdup(user_args[i]);
-    }
-    cmd_args[full_args_len] = NULL;
-
-    g_strfreev(user_args); // Free the split array
-
-    g_print("Running debug command:");
-    for(guint i = 0; i < full_args_len; i++) {
-        g_print(" %s", cmd_args[i]);
-    }
-    g_print("\n");
-
-    gchar *stdout_str = NULL;
-    gchar *stderr_str = NULL;
-    gint exit_status;
-    GError *error = NULL;
-
-    g_spawn_sync(
-        NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
-        NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
-    );
-
-    // Free the dynamically constructed cmd_args
-    g_strfreev(cmd_args);
-
-    // Display output
-    GtkTextIter iter;
-    gtk_text_buffer_get_end_iter(state->debug_output_buffer, &iter);
-    gchar *header_msg = g_strdup_printf("Running: adb -s %s shell %s\n\n", state->selected_device_id, command_text);
-    gtk_text_buffer_insert(state->debug_output_buffer, &iter, header_msg, -1);
-    g_free(header_msg);
-
-    if (error) {
-        gchar *msg = g_strdup_printf("Failed to execute command: %s\n", error->message);
-        gtk_text_buffer_insert(state->debug_output_buffer, &iter, msg, -1);
-        g_free(msg);
-        g_error_free(error);
-    } else {
-        // Append STDOUT
-        if (stdout_str && *stdout_str != '\0') {
-            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "--- STDOUT ---\n", -1);
-            gtk_text_buffer_insert(state->debug_output_buffer, &iter, stdout_str, -1);
-            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "\n", -1);
-        }
-        // Append STDERR
-        if (stderr_str && *stderr_str != '\0') {
-            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "--- STDERR ---\n", -1);
-            gtk_text_buffer_insert(state->debug_output_buffer, &iter, stderr_str, -1);
-            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "\n", -1);
-        }
-        // Append Exit Status
-        gchar *status_msg = g_strdup_printf("\n--- Process finished with exit code: %d ---", WEXITSTATUS(exit_status));
-        gtk_text_buffer_insert(state->debug_output_buffer, &iter, status_msg, -1);
-        g_free(status_msg);
-    }
-
-    g_free(stdout_str);
-    g_free(stderr_str);
-    gtk_widget_set_sensitive(GTK_WIDGET(button), TRUE);
 }
 
 
@@ -882,6 +737,101 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
 }
 
 
+/**
+ * @brief Handler for running custom ADB shell commands from the Debug page. (NEW)
+ */
+static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
+    // 1. Check if a device is selected
+    if (!state->selected_device_id) {
+        gtk_text_buffer_set_text(state->debug_output_buffer, "Error: Please select a connected device from the 'Debloat' page first.", -1);
+        return;
+    }
+
+    // 2. Get the command from the entry
+    const gchar *command_str = gtk_editable_get_text(GTK_EDITABLE(state->debug_command_entry));
+    if (!command_str || *command_str == '\0') {
+        gtk_text_buffer_set_text(state->debug_output_buffer, "Error: No command entered.", -1);
+        return;
+    }
+
+    // 3. Construct the full adb command
+    // We will run "adb -s <device> shell <command_str>"
+    // g_spawn_sync needs a NULL-terminated array.
+    // We split the user's command string by spaces
+    gchar **user_cmd_parts = g_strsplit(command_str, " ", -1);
+    
+    // Count how many parts we have
+    gint user_cmd_len = g_strv_length(user_cmd_parts);
+    
+    // Create a new array large enough for: "adb", "-s", device_id, "shell", ...user_cmd_parts, NULL
+    gchar **cmd_args = g_new(gchar*, 5 + user_cmd_len);
+    cmd_args[0] = "adb";
+    cmd_args[1] = "-s";
+    cmd_args[2] = state->selected_device_id;
+    cmd_args[3] = "shell";
+    
+    // Copy the user's command parts
+    for (int i = 0; i < user_cmd_len; i++) {
+        cmd_args[4 + i] = user_cmd_parts[i];
+    }
+    cmd_args[4 + user_cmd_len] = NULL; // NULL terminator
+
+    // 4. Clear the output buffer and show "Running..."
+    gtk_text_buffer_set_text(state->debug_output_buffer, "", -1);
+    GtkTextIter iter;
+    gtk_text_buffer_get_end_iter(state->debug_output_buffer, &iter);
+    gtk_text_buffer_insert(state->debug_output_buffer, &iter, "Running command:\n", -1);
+    
+    gchar *full_cmd_display = g_strjoinv(" ", cmd_args);
+    gtk_text_buffer_insert(state->debug_output_buffer, &iter, full_cmd_display, -1);
+    gtk_text_buffer_insert(state->debug_output_buffer, &iter, "\n\n", -1);
+    g_free(full_cmd_display);
+
+    // 5. Execute the command
+    gchar *stdout_str = NULL;
+    gchar *stderr_str = NULL;
+    gint exit_status;
+    GError *error = NULL;
+
+    g_spawn_sync(
+        NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
+        NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
+    );
+
+    // 6. Print results to the text buffer
+    if (error) {
+        gchar *err_msg = g_strdup_printf("--- EXECUTION FAILED ---\n%s\n", error->message);
+        gtk_text_buffer_insert(state->debug_output_buffer, &iter, err_msg, -1);
+        g_free(err_msg);
+        g_error_free(error);
+    } else {
+        if (stdout_str && *stdout_str != '\0') {
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "--- STDOUT ---\n", -1);
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, stdout_str, -1);
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "\n", -1);
+        }
+        if (stderr_str && *stderr_str != '\0') {
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "--- STDERR ---\n", -1);
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, stderr_str, -1);
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "\n", -1);
+        }
+        if ((!stdout_str || *stdout_str == '\0') && (!stderr_str || *stderr_str == '\0')) {
+             gtk_text_buffer_insert(state->debug_output_buffer, &iter, "--- COMMAND RAN WITH NO OUTPUT ---\n", -1);
+        }
+        
+        gchar *exit_msg = g_strdup_printf("\n--- Exit Status: %d ---\n", WEXITSTATUS(exit_status));
+        gtk_text_buffer_insert(state->debug_output_buffer, &iter, exit_msg, -1);
+        g_free(exit_msg);
+    }
+
+    // 7. Clean up
+    g_free(stdout_str);
+    g_free(stderr_str);
+    g_strfreev(user_cmd_parts);
+    g_free(cmd_args);
+}
+
+
 // --- LIST POPULATION FUNCTIONS ---
 
 /**
@@ -1076,7 +1026,7 @@ static void activate(GtkApplication *app, AppState *state) {
     // Create main window
     state->window = ADW_APPLICATION_WINDOW(adw_application_window_new(GTK_APPLICATION(app)));
     gtk_window_set_title(GTK_WINDOW(state->window), "Android Debloater");
-    gtk_window_set_default_size(GTK_WINDOW(state->window), 900, 600);
+    gtk_window_set_default_size(GTK_WINDOW(state->window), 900, 600); // Reset height
 
     // --- Main Vertical Box (Header + Stack) ---
     GtkWidget *main_content_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -1089,11 +1039,11 @@ static void activate(GtkApplication *app, AppState *state) {
     GtkWidget *stack_switcher = gtk_stack_switcher_new();
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header_bar), stack_switcher);
 
-    GtkWidget *about_button = gtk_button_new_from_icon_name("help-about-symbolic");
+    GtkWidget *about_button = gtk_button_new_from_icon_name("help-about-symbolIC");
     adw_header_bar_pack_end(ADW_HEADER_BAR(header_bar), about_button);
     g_signal_connect(about_button, "clicked", G_CALLBACK(on_about_clicked), GTK_WINDOW(state->window));
 
-    // --- Main Stack (Debloat Page, Undo Page) ---
+    // --- Main Stack (Debloat Page, Undo Page, Debug Page) ---
     GtkWidget *stack = gtk_stack_new();
     gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(stack_switcher), GTK_STACK(stack));
     gtk_box_append(GTK_BOX(main_content_box), stack);
@@ -1114,7 +1064,7 @@ static void activate(GtkApplication *app, AppState *state) {
     GtkWidget *adb_header = gtk_label_new("Select Connected Device");
     gtk_widget_add_css_class(adb_header, "title-4");
     gtk_label_set_xalign(GTK_LABEL(adb_header), 0.0);
-    gtk_box_append(GTK_BOX(left_box), adb_header); // <-- TYPO FIX
+    gtk_box_append(GTK_BOX(left_box), adb_header);
 
     GtkWidget *adb_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_append(GTK_BOX(left_box), adb_hbox);
@@ -1134,27 +1084,12 @@ static void activate(GtkApplication *app, AppState *state) {
     g_signal_connect(refresh_button, "clicked", G_CALLBACK(on_refresh_devices_clicked), state);
     gtk_box_append(GTK_BOX(adb_hbox), refresh_button);
 
-    // --- NEW: Wireless ADB Connection ---
-    GtkWidget *wireless_header = gtk_label_new("Connect Wireless Device (IP:Port)");
-    gtk_widget_add_css_class(wireless_header, "title-4");
-    gtk_label_set_xalign(GTK_LABEL(wireless_header), 0.0);
-    gtk_widget_set_margin_top(wireless_header, 10);
-    gtk_box_append(GTK_BOX(left_box), wireless_header);
-
-    GtkWidget *wireless_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    gtk_box_append(GTK_BOX(left_box), wireless_hbox);
-    
-    // IP Address Entry
-    state->wireless_ip_entry = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(state->wireless_ip_entry), "e.g., 192.168.1.10:5555");
-    gtk_widget_set_hexpand(state->wireless_ip_entry, TRUE);
-    gtk_box_append(GTK_BOX(wireless_hbox), state->wireless_ip_entry);
-
-    // Connect Button
-    GtkWidget *connect_button = gtk_button_new_with_label("Connect");
-    gtk_widget_set_tooltip_text(connect_button, "Connect to wireless ADB device");
-    g_signal_connect(connect_button, "clicked", G_CALLBACK(on_connect_wireless_clicked), state);
-    gtk_box_append(GTK_BOX(wireless_hbox), connect_button);
+    // --- NEW: Device Status Label (replaces wireless) ---
+    state->device_status_label = gtk_label_new("Welcome! Connect a device.");
+    gtk_widget_set_margin_top(state->device_status_label, 5);
+    gtk_label_set_xalign(GTK_LABEL(state->device_status_label), 0.0);
+    gtk_label_set_wrap(GTK_LABEL(state->device_status_label), TRUE);
+    gtk_box_append(GTK_BOX(left_box), state->device_status_label);
     // --- END NEW ---
 
 
@@ -1220,7 +1155,7 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_paned_set_end_child(GTK_PANED(paned), right_container);
 
     // Set initial paned position 
-    gtk_paned_set_position(GTK_PANED(paned), 320); 
+    gtk_paned_set_position(GTK_PANED(paned), 320); // Reset width
 
 
     // --- PAGE 2: UNDO ---
@@ -1249,7 +1184,7 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_box_append(GTK_BOX(undo_page_box), uninstalled_scrolled);
 
 
-    // --- PAGE 3: DEBUG (NEW) ---
+    // --- PAGE 3: DEBUG --- (NEW)
     GtkWidget *debug_page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_widget_set_margin_start(debug_page_box, 10);
     gtk_widget_set_margin_end(debug_page_box, 10);
@@ -1259,23 +1194,28 @@ static void activate(GtkApplication *app, AppState *state) {
     // Add "Debug" page to the stack
     gtk_stack_add_titled(GTK_STACK(stack), debug_page_box, "debug", "Debug");
 
-    GtkWidget *debug_header = gtk_label_new("Custom ADB Shell Command");
+    // Header for command entry
+    GtkWidget *debug_header = gtk_label_new("Run Custom ADB Shell Command");
     gtk_widget_add_css_class(debug_header, "title-4");
     gtk_label_set_xalign(GTK_LABEL(debug_header), 0.0);
+    gtk_widget_set_margin_top(debug_header, 10);
     gtk_box_append(GTK_BOX(debug_page_box), debug_header);
 
-    GtkWidget *debug_info_label = gtk_label_new("Enter the command to run via 'adb shell ...'. (e.g., 'pm list packages -f')");
+    GtkWidget *debug_info_label = gtk_label_new(
+        "Enter a shell command (e.g., 'pm list packages'). 'adb -s <device_id> shell' is prefixed automatically."
+    );
     gtk_label_set_xalign(GTK_LABEL(debug_info_label), 0.0);
     gtk_widget_add_css_class(debug_info_label, "caption");
     gtk_box_append(GTK_BOX(debug_page_box), debug_info_label);
+
 
     // Command Entry HBox
     GtkWidget *debug_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_widget_set_margin_top(debug_hbox, 5);
     gtk_box_append(GTK_BOX(debug_page_box), debug_hbox);
-
+    
     state->debug_command_entry = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(state->debug_command_entry), "e.g., pm list packages");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(state->debug_command_entry), "pm list packages -f");
     gtk_widget_set_hexpand(state->debug_command_entry, TRUE);
     gtk_box_append(GTK_BOX(debug_hbox), state->debug_command_entry);
 
@@ -1284,24 +1224,25 @@ static void activate(GtkApplication *app, AppState *state) {
     g_signal_connect(debug_run_button, "clicked", G_CALLBACK(on_run_debug_command_clicked), state);
     gtk_box_append(GTK_BOX(debug_hbox), debug_run_button);
 
-    // Output Scrolled Window
-    GtkWidget *debug_output_scrolled = gtk_scrolled_window_new();
-    gtk_widget_set_vexpand(debug_output_scrolled, TRUE);
-    gtk_widget_set_margin_top(debug_output_scrolled, 10);
-    gtk_box_append(GTK_BOX(debug_page_box), debug_output_scrolled);
+    // Output Text View
+    GtkWidget *output_header = gtk_label_new("Command Output");
+    gtk_widget_add_css_class(output_header, "title-4");
+    gtk_label_set_xalign(GTK_LABEL(output_header), 0.0);
+    gtk_widget_set_margin_top(output_header, 10);
+    gtk_box_append(GTK_BOX(debug_page_box), output_header);
+
+    GtkWidget *debug_scrolled = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(debug_scrolled, TRUE);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(debug_scrolled), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_box_append(GTK_BOX(debug_page_box), debug_scrolled);
 
     GtkWidget *debug_output_view = gtk_text_view_new();
     gtk_text_view_set_editable(GTK_TEXT_VIEW(debug_output_view), FALSE);
-    gtk_text_view_set_monospace(GTK_TEXT_VIEW(debug_output_view), TRUE);
-    gtk_widget_set_margin_top(debug_output_view, 5);
-    gtk_widget_set_margin_bottom(debug_output_view, 5);
-    gtk_widget_set_margin_start(debug_output_view, 5);
-    gtk_widget_set_margin_end(debug_output_view, 5);
-    
+    gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(debug_output_view), FALSE);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(debug_output_view), GTK_WRAP_WORD_CHAR);
     state->debug_output_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(debug_output_view));
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(debug_output_scrolled), debug_output_view);
-
-
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(debug_scrolled), debug_output_view);
+    
     // --- FINAL SETUP ---
 
     // Load initial device list (which auto-selects and loads the app list)
@@ -1310,10 +1251,9 @@ static void activate(GtkApplication *app, AppState *state) {
     // Populate ADB devices at startup
     populate_adb_devices(state);
 
-    // Show the main window
     gtk_window_present(GTK_WINDOW(state->window));
-    
-    // Show the welcome dialog on top of the main window (NEW)
+
+    // Show the welcome guide dialog *after* the main window is presented
     show_welcome_dialog(GTK_WINDOW(state->window));
 }
 
@@ -1348,7 +1288,7 @@ int main(int argc, char **argv) {
     // Allocate and initialize global state
     app_state = g_new0(AppState, 1);
 
-    app = adw_application_new("com.kushagrakarira.debloater", G_APPLICATION_DEFAULT_FLAGS); // <-- CHANGED
+    app = adw_application_new("com.gemini.debloater", G_APPLICATION_DEFAULT_FLAGS); // <-- CHANGED
     
     // Connect signals
     g_signal_connect(app, "activate", G_CALLBACK(activate), app_state);
