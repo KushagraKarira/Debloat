@@ -33,6 +33,9 @@ typedef struct {
     // New widgets for real ADB device selection
     GtkWidget *device_dropdown;
     GtkStringList *device_model;
+    
+    // NEW: Widget for wireless ADB
+    GtkWidget *wireless_ip_entry;
 
     gchar *selected_device_id;        // The real device serial (e.g., "ABC12345")
     gchar *selected_manufacturer_id;  // The list to show (e.g., "Samsung")
@@ -54,6 +57,7 @@ static void on_reinstall_clicked(GtkButton *button, AppItem *item);
 static void add_row_to_uninstalled_list(AppState *state, AppItem *item);
 static void on_about_clicked(GtkButton *button, GtkWindow *parent); // <-- CHANGED
 static void show_welcome_dialog(GtkWindow *parent); // <-- NEW
+static void on_connect_wireless_clicked(GtkButton *button, AppState *state); // <-- NEW
 
 
 // --- PACKAGE DATA (Bloatware lists) ---
@@ -280,12 +284,17 @@ static void show_welcome_dialog(GtkWindow *parent) {
     // --- Instructions ---
     const gchar *instructions = 
         "To use this tool, you must enable **USB Debugging (ADB)** on your device.\n\n"
+        "**Wired Connection:**\n"
         "1.  Go to **Settings** > **About Phone**.\n"
         "2.  Tap on **Build Number** 7 times until you see 'You are now a developer!'.\n"
         "3.  Go back to **Settings** > **System** > **Developer options**.\n"
         "4.  Find and turn on **USB debugging**.\n"
         "5.  Connect your phone to your computer via USB.\n"
-        "6.  A prompt will appear on your phone: 'Allow USB debugging?'. Check 'Always allow' and tap **OK**.";
+        "6.  A prompt will appear on your phone: 'Allow USB debugging?'. Check 'Always allow' and tap **OK**."
+        "\n\n**Wireless Connection (Optional):**\n"
+        "1.  In **Developer options**, enable **Wireless debugging**.\n"
+        "2.  Tap 'Wireless debugging' (the text, not the switch) to see your device's **IP Address & Port** (e.g., 192.168.1.5:45555).\n"
+        "3.  Enter this IP and Port into the 'Connect Wireless Device' box in the app and click 'Connect'.";
 
     GtkWidget *label = gtk_label_new(instructions);
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
@@ -477,6 +486,62 @@ static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, App
  */
 static void on_refresh_devices_clicked(GtkButton *button, AppState *state) {
     populate_adb_devices(state);
+}
+
+
+/**
+ * @brief Handler for the "Connect" button for wireless ADB. (NEW)
+ */
+static void on_connect_wireless_clicked(GtkButton *button, AppState *state) {
+    const gchar *ip_address = gtk_editable_get_text(GTK_EDITABLE(state->wireless_ip_entry));
+    if (!ip_address || *ip_address == '\0') {
+        gtk_label_set_text(GTK_LABEL(state->status_label), "Please enter an IP address and port.");
+        return;
+    }
+
+    g_print("Attempting to connect to: %s\n", ip_address);
+    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE); // Disable button during op
+
+    gchar *stdout_str = NULL;
+    gchar *stderr_str = NULL;
+    gint exit_status;
+    GError *error = NULL;
+    
+    // We must cast the const gchar* from the entry to gchar* for the array
+    gchar *cmd_args[] = {"adb", "connect", (gchar *)ip_address, NULL};
+
+    g_spawn_sync(
+        NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
+        NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
+    );
+
+    gchar *msg;
+    if (error) {
+        msg = g_strdup_printf("Failed to run 'adb connect': %s", error->message);
+        g_error_free(error);
+    } else {
+        gchar *stripped_out = stdout_str ? g_strstrip(stdout_str) : "No output";
+        gchar *stripped_err = stderr_str ? g_strstrip(stderr_str) : "No output";
+
+        // Check for success strings
+        if (g_str_has_prefix(stripped_out, "connected to") || g_str_has_prefix(stripped_out, "already connected to")) {
+            msg = g_strdup_printf("Successfully connected to %s", ip_address);
+            // Clear the entry on success
+            gtk_editable_set_text(GTK_EDITABLE(state->wireless_ip_entry), "");
+        } else {
+            msg = g_strdup_printf("Failed: %s / %s", stripped_out, stripped_err);
+        }
+    }
+
+    gtk_label_set_text(GTK_LABEL(state->status_label), msg);
+    g_free(msg);
+    gtk_widget_set_sensitive(GTK_WIDGET(button), TRUE); // Re-enable button
+
+    // ALWAYS refresh the device list after attempting a connect
+    populate_adb_devices(state);
+
+    g_free(stdout_str);
+    g_free(stderr_str);
 }
 
 
@@ -967,6 +1032,30 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_widget_set_tooltip_text(refresh_button, "Refresh ADB Device List");
     g_signal_connect(refresh_button, "clicked", G_CALLBACK(on_refresh_devices_clicked), state);
     gtk_box_append(GTK_BOX(adb_hbox), refresh_button);
+
+    // --- NEW: Wireless ADB Connection ---
+    GtkWidget *wireless_header = gtk_label_new("Connect Wireless Device (IP:Port)");
+    gtk_widget_add_css_class(wireless_header, "title-4");
+    gtk_label_set_xalign(GTK_LABEL(wireless_header), 0.0);
+    gtk_widget_set_margin_top(wireless_header, 10);
+    gtk_box_append(GTK_BOX(left_box), wireless_header);
+
+    GtkWidget *wireless_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_append(GTK_BOX(left_box), wireless_hbox);
+    
+    // IP Address Entry
+    state->wireless_ip_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(state->wireless_ip_entry), "e.g., 192.168.1.10:5555");
+    gtk_widget_set_hexpand(state->wireless_ip_entry, TRUE);
+    gtk_box_append(GTK_BOX(wireless_hbox), state->wireless_ip_entry);
+
+    // Connect Button
+    GtkWidget *connect_button = gtk_button_new_with_label("Connect");
+    gtk_widget_set_tooltip_text(connect_button, "Connect to wireless ADB device");
+    g_signal_connect(connect_button, "clicked", G_CALLBACK(on_connect_wireless_clicked), state);
+    gtk_box_append(GTK_BOX(wireless_hbox), connect_button);
+    // --- END NEW ---
+
 
     // --- Manufacturer List ---
     GtkWidget *device_header = gtk_label_new("Select Manufacturer List"); // Title changed
