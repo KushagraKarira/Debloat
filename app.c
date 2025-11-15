@@ -27,8 +27,13 @@ typedef struct {
     GtkWidget *action_bar;
     GtkWidget *debloat_button;
     GtkWidget *status_label;
-    GtkWidget *adb_debug_button; 
-    gchar *selected_device_id;
+    
+    // New widgets for real ADB device selection
+    GtkWidget *device_dropdown;
+    GtkStringList *device_model;
+
+    gchar *selected_device_id;        // The real device serial (e.g., "ABC12345")
+    gchar *selected_manufacturer_id;  // The list to show (e.g., "Samsung")
     GList *app_list; // List of AppItem*
 } AppState;
 
@@ -38,6 +43,8 @@ static AppState *app_state = NULL;
 // --- FUNCTION PROTOTYPES ---
 static void update_app_list(AppState *state);
 static void update_action_bar_visibility(AppState *state);
+static void populate_adb_devices(AppState *state);
+static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, AppState *state);
 
 
 // --- PACKAGE DATA (Bloatware lists) ---
@@ -227,15 +234,10 @@ static void update_action_bar_visibility(AppState *state) {
         }
     }
 
-    if (selected_count > 0 && state->selected_device_id && g_strcmp0(state->selected_device_id, "ADB_DEBUG") != 0) {
+    // New simplified logic: Do we have selected apps AND a real selected device?
+    if (selected_count > 0 && state->selected_device_id != NULL) {
         gtk_widget_set_visible(state->action_bar, TRUE);
-        gchar *label_text = g_strdup_printf("Ready to debloat %d app(s) on device category '%s'.", selected_count, state->selected_device_id);
-        gtk_label_set_text(GTK_LABEL(state->status_label), label_text);
-        g_free(label_text);
-        gtk_widget_set_sensitive(state->debloat_button, TRUE);
-    } else if (selected_count > 0 && g_strcmp0(state->selected_device_id, "ADB_DEBUG") == 0) {
-        gtk_widget_set_visible(state->action_bar, TRUE);
-        gchar *label_text = g_strdup_printf("Ready to debloat %d app(s) on connected device '%s'.", selected_count, state->selected_device_id);
+        gchar *label_text = g_strdup_printf("Ready to debloat %d app(s) on device '%s'.", selected_count, state->selected_device_id);
         gtk_label_set_text(GTK_LABEL(state->status_label), label_text);
         g_free(label_text);
         gtk_widget_set_sensitive(state->debloat_button, TRUE);
@@ -297,20 +299,14 @@ static void on_device_selected(GtkListBox *list_box, GtkListBoxRow *row, AppStat
     if (!row) return;
 
     // Get the device ID stored in the row
-    const gchar *device_id_data = g_object_get_data(G_OBJECT(row), "device-id");
-    if (!device_id_data) return;
+    const gchar *manufacturer_id = g_object_get_data(G_OBJECT(row), "device-id");
+    if (!manufacturer_id) return;
 
-    // Only update selected_device_id if it's the ADB_DEBUG option
-    if (g_strcmp0(device_id_data, "ADB_DEBUG") == 0) {
-        if (state->selected_device_id) g_free(state->selected_device_id);
-        state->selected_device_id = g_strdup("ADB_DEBUG");
-    } else {
-        // For manufacturer selection, we use the manufacturer name as the device ID mock
-        if (state->selected_device_id) g_free(state->selected_device_id);
-        state->selected_device_id = g_strdup(device_id_data);
-    }
-
-    g_print("Device category selected: %s\n", state->selected_device_id);
+    // Store the selected MANUFACTURER ID
+    if (state->selected_manufacturer_id) g_free(state->selected_manufacturer_id);
+    state->selected_manufacturer_id = g_strdup(manufacturer_id);
+    
+    g_print("Manufacturer list selected: %s\n", state->selected_manufacturer_id);
     
     // Disable the debloat button immediately until a package is selected
     gtk_widget_set_sensitive(state->debloat_button, FALSE);
@@ -320,53 +316,111 @@ static void on_device_selected(GtkListBox *list_box, GtkListBoxRow *row, AppStat
     update_app_list(state);
 }
 
+
 /**
- * @brief Handler for the ADB Debug button click. Simulates finding and connecting to a device.
+ * @brief Runs 'adb devices' and populates the device_dropdown.
  */
-static void on_adb_debug_clicked(GtkButton *button, AppState *state) {
-    // 1. Simulate ADB command execution to find a device
-    g_print("Executing: adb devices\n");
+static void populate_adb_devices(AppState *state) {
+    gchar *stdout_str = NULL;
+    gchar *stderr_str = NULL;
+    gint exit_status;
+    GError *error = NULL;
+    gchar *cmd_args[] = {"adb", "devices", NULL};
 
-    // 2. Simulate finding a device ID
-    // In a real app, this would be retrieved from the adb output. Here, we use a placeholder.
-    const gchar *real_device_id = "REAL_DEVICE_ID"; 
-    g_print("ADB Result: Device found: %s\n", real_device_id);
+    g_print("Running: adb devices\n");
 
-    // 3. Update the selected device ID to the "real" device ID
+    // --- START FIX V3 ---
+    // Clear the existing list, but keep the placeholder at index 0
+    guint n_items = g_list_model_get_n_items(G_LIST_MODEL(state->device_model));
+    // Remove items from index 1 (the one after the placeholder)
+    while (n_items > 1) {
+        gtk_string_list_remove(state->device_model, 1);
+        n_items--;
+    }
+    // --- END FIX V3 ---
+    
+    // Set default selection to the placeholder
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(state->device_dropdown), 0);
     if (state->selected_device_id) {
         g_free(state->selected_device_id);
+        state->selected_device_id = NULL;
     }
-    state->selected_device_id = g_strdup(real_device_id);
-    
-    // 4. Update status message
-    gchar *status_msg = g_strdup_printf("ADB Debug: Found and connected to device ID: %s. Selecting Samsung's bloatware list to debloat on this device.", real_device_id);
-    gtk_label_set_text(GTK_LABEL(state->status_label), status_msg);
-    g_free(status_msg);
 
-    // 5. Select the Samsung mock row and reload apps
-    GtkListBoxRow *samsung_row = NULL;
-    GtkListBox *list_box = GTK_LIST_BOX(state->device_list_box);
-    int i = 0;
-    // Iterate through list box rows using gtk_list_box_get_row_at_index
-    while (TRUE) {
-        GtkListBoxRow *row = gtk_list_box_get_row_at_index(list_box, i++);
-        if (!row) break; 
+    g_spawn_sync(
+        NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
+        NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
+    );
+
+    if (error) {
+        g_printerr("Failed to execute 'adb': %s. Is it in your PATH?\n", error->message);
+        gtk_label_set_text(GTK_LABEL(state->status_label), "Error: 'adb' command not found.");
+        g_error_free(error);
+        g_free(stdout_str);
+        g_free(stderr_str);
+        return;
+    }
+
+    if (stdout_str) {
+        g_print("ADB Output:\n%s\n", stdout_str);
         
-        const gchar *device_id_data = g_object_get_data(G_OBJECT(row), "device-id");
-        if (device_id_data && g_strcmp0(device_id_data, "Samsung") == 0) {
-            samsung_row = row;
-            break;
-        }
-    }
+        // Split the output by lines
+        gchar **lines = g_strsplit(stdout_str, "\n", -1);
+        
+        for (int i = 0; lines[i] != NULL; i++) {
+            // Skip the first line ("List of devices attached")
+            if (i == 0) continue;
 
-    if (samsung_row) {
-        gtk_list_box_select_row(GTK_LIST_BOX(state->device_list_box), samsung_row);
-        // Manually call the selection handler to load the packages for 'Samsung'
-        on_device_selected(GTK_LIST_BOX(state->device_list_box), samsung_row, state);
+            // Split line by tab
+            gchar **parts = g_strsplit(lines[i], "\t", 2);
+            
+            if (g_strv_length(parts) == 2) {
+                gchar *device_id = g_strstrip(parts[0]);
+                gchar *device_state = g_strstrip(parts[1]);
+
+                // Only add devices that are fully connected
+                if (g_strcmp0(device_state, "device") == 0) {
+                    g_print("Found device: %s\n", device_id);
+                    gtk_string_list_append(state->device_model, device_id);
+                }
+            }
+            g_strfreev(parts);
+        }
+        g_strfreev(lines);
     }
     
-    // Ensure the action bar visibility is correct based on new state
+    g_free(stdout_str);
+    g_free(stderr_str);
     update_action_bar_visibility(state);
+}
+
+/**
+ * @brief Handler for when a device is selected from the ADB dropdown.
+ */
+static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, AppState *state) {
+    guint pos = gtk_drop_down_get_selected(dropdown);
+
+    if (state->selected_device_id) {
+        g_free(state->selected_device_id);
+        state->selected_device_id = NULL;
+    }
+
+    // pos 0 is the "Select a connected device..." placeholder
+    if (pos > 0) {
+        const gchar *device_id = gtk_string_list_get_string(state->device_model, pos);
+        state->selected_device_id = g_strdup(device_id);
+        g_print("ADB device selected: %s\n", state->selected_device_id);
+    } else {
+        g_print("No ADB device selected.\n");
+    }
+    
+    update_action_bar_visibility(state);
+}
+
+/**
+ * @brief Simple callback to refresh the ADB device list.
+ */
+static void on_refresh_devices_clicked(GtkButton *button, AppState *state) {
+    populate_adb_devices(state);
 }
 
 
@@ -572,8 +626,8 @@ static void update_device_list(AppState *state) {
 
         gtk_list_box_append(GTK_LIST_BOX(state->device_list_box), row_widget);
 
-        // Select the row corresponding to the initial state->selected_device_id
-        if (g_strcmp0(mock_ids[i], state->selected_device_id) == 0) {
+        // Select the row corresponding to the initial state->selected_manufacturer_id
+        if (g_strcmp0(mock_ids[i], state->selected_manufacturer_id) == 0) {
             initial_row = GTK_LIST_BOX_ROW(row_widget);
         }
     }
@@ -600,8 +654,7 @@ static void update_app_list(AppState *state) {
 
     // Determine which package list to load based on the category ID
     const PackageEntry *packages_to_load = NULL;
-    GtkListBoxRow *selected_row = gtk_list_box_get_selected_row(GTK_LIST_BOX(state->device_list_box));
-    const gchar *category_id = selected_row ? g_object_get_data(G_OBJECT(selected_row), "device-id") : NULL;
+    const gchar *category_id = state->selected_manufacturer_id;
 
     if (category_id) {
         if (g_strcmp0(category_id, "Samsung") == 0) {
@@ -692,7 +745,8 @@ static void update_app_list(AppState *state) {
  */
 static void activate(GtkApplication *app, AppState *state) {
     // Initialize application state
-    state->selected_device_id = g_strdup("Oppo"); 
+    state->selected_device_id = NULL; // No device selected at start
+    state->selected_manufacturer_id = g_strdup("Oppo"); // Default list to show
     state->app_list = NULL;
 
     // Create main window
@@ -713,12 +767,42 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_window_set_child(GTK_WINDOW(state->window), paned);
 
     // --- LEFT PANE (Device Selection, 20%) ---
-    GtkWidget *left_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    GtkWidget *device_header = gtk_label_new("Select Device Category");
+    GtkWidget *left_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_widget_set_margin_start(left_box, 10);
+    gtk_widget_set_margin_end(left_box, 10);
+    gtk_widget_set_margin_top(left_box, 10);
+    gtk_widget_set_margin_bottom(left_box, 10);
+
+    // --- ADB Device Selector (NEW) ---
+    GtkWidget *adb_header = gtk_label_new("Select Connected Device");
+    gtk_widget_add_css_class(adb_header, "title-4");
+    gtk_label_set_xalign(GTK_LABEL(adb_header), 0.0);
+    gtk_box_append(GTK_BOX(left_box), adb_header);
+
+    GtkWidget *adb_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_append(GTK_BOX(left_box), adb_hbox);
+
+    // The Dropdown Menu
+    state->device_model = gtk_string_list_new(NULL);
+    // Add placeholder *immediately*
+    gtk_string_list_append(state->device_model, "Select a connected device...");
+    state->device_dropdown = gtk_drop_down_new(G_LIST_MODEL(state->device_model), NULL);
+    gtk_widget_set_hexpand(state->device_dropdown, TRUE);
+    g_signal_connect(state->device_dropdown, "notify::selected", G_CALLBACK(on_adb_device_selected), state);
+    gtk_box_append(GTK_BOX(adb_hbox), state->device_dropdown);
+
+    // The Refresh Button
+    GtkWidget *refresh_button = gtk_button_new_from_icon_name("view-refresh-symbolic");
+    gtk_widget_set_tooltip_text(refresh_button, "Refresh ADB Device List");
+    g_signal_connect(refresh_button, "clicked", G_CALLBACK(on_refresh_devices_clicked), state);
+    gtk_box_append(GTK_BOX(adb_hbox), refresh_button);
+
+    // --- Manufacturer List (MODIFIED) ---
+    GtkWidget *device_header = gtk_label_new("Select Manufacturer List"); // Title changed
     gtk_widget_add_css_class(device_header, "title-4");
+    gtk_label_set_xalign(GTK_LABEL(device_header), 0.0);
     gtk_box_append(GTK_BOX(left_box), device_header);
     gtk_widget_set_margin_top(device_header, 10);
-    gtk_widget_set_margin_bottom(device_header, 5);
 
     state->device_list_box = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->device_list_box), GTK_SELECTION_SINGLE);
@@ -732,28 +816,6 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_widget_set_vexpand(state->device_list_box, TRUE);
 
     gtk_box_append(GTK_BOX(left_box), device_scrolled);
-
-    // ADB Debug section
-    GtkWidget *adb_frame = gtk_frame_new("ADB Connection");
-    GtkWidget *adb_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    
-    gtk_widget_set_margin_start(adb_vbox, 10);
-    gtk_widget_set_margin_end(adb_vbox, 10);
-    gtk_widget_set_margin_top(adb_vbox, 10);
-    gtk_widget_set_margin_bottom(adb_vbox, 10);
-    
-    gtk_frame_set_child(GTK_FRAME(adb_frame), adb_vbox);
-    gtk_box_append(GTK_BOX(left_box), adb_frame);
-
-    gtk_widget_set_margin_start(adb_frame, 10);
-    gtk_widget_set_margin_end(adb_frame, 10);
-    gtk_widget_set_margin_top(adb_frame, 10);
-    gtk_widget_set_margin_bottom(adb_frame, 10);
-
-    state->adb_debug_button = gtk_button_new_with_label("Connect Real ADB Device");
-    gtk_widget_add_css_class(state->adb_debug_button, "suggested-action");
-    gtk_box_append(GTK_BOX(adb_vbox), state->adb_debug_button);
-    g_signal_connect(state->adb_debug_button, "clicked", G_CALLBACK(on_adb_debug_clicked), state);
 
 
     gtk_paned_set_start_child(GTK_PANED(paned), left_box);
@@ -801,6 +863,9 @@ static void activate(GtkApplication *app, AppState *state) {
 
     // Load initial device list (which auto-selects and loads the app list)
     update_device_list(state);
+    
+    // Populate ADB devices at startup
+    populate_adb_devices(state);
 
     gtk_window_present(GTK_WINDOW(state->window));
 }
@@ -811,6 +876,12 @@ static void activate(GtkApplication *app, AppState *state) {
 static void on_shutdown(GtkApplication *app, gpointer user_data) {
     if (app_state->selected_device_id) {
         g_free(app_state->selected_device_id);
+    }
+    if (app_state->selected_manufacturer_id) {
+        g_free(app_state->selected_manufacturer_id);
+    }
+    if (app_state->device_model) {
+        g_object_unref(app_state->device_model);
     }
     if (app_state->app_list) {
         g_list_free_full(app_state->app_list, (GDestroyNotify)app_item_free);
