@@ -37,6 +37,10 @@ typedef struct {
     // NEW: Widget for wireless ADB
     GtkWidget *wireless_ip_entry;
 
+    // NEW: Widgets for Debug Page
+    GtkWidget *debug_command_entry;
+    GtkTextBuffer *debug_output_buffer;
+
     gchar *selected_device_id;        // The real device serial (e.g., "ABC12345")
     gchar *selected_manufacturer_id;  // The list to show (e.g., "Samsung")
     GList *app_list; // List of AppItem*
@@ -58,6 +62,7 @@ static void add_row_to_uninstalled_list(AppState *state, AppItem *item);
 static void on_about_clicked(GtkButton *button, GtkWindow *parent); // <-- CHANGED
 static void show_welcome_dialog(GtkWindow *parent); // <-- NEW
 static void on_connect_wireless_clicked(GtkButton *button, AppState *state); // <-- NEW
+static void on_run_debug_command_clicked(GtkButton *button, AppState *state); // <-- NEW
 
 
 // --- PACKAGE DATA (Bloatware lists) ---
@@ -542,6 +547,102 @@ static void on_connect_wireless_clicked(GtkButton *button, AppState *state) {
 
     g_free(stdout_str);
     g_free(stderr_str);
+}
+
+
+/**
+ * @brief Handler for the "Run" button on the Debug page. (NEW)
+ */
+static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
+    const gchar *command_text = gtk_editable_get_text(GTK_EDITABLE(state->debug_command_entry));
+    
+    // Clear output buffer
+    gtk_text_buffer_set_text(state->debug_output_buffer, "", -1);
+
+    if (!state->selected_device_id) {
+        gtk_text_buffer_set_text(state->debug_output_buffer, "Error: No ADB device selected.", -1);
+        return;
+    }
+    if (!command_text || *command_text == '\0') {
+        gtk_text_buffer_set_text(state->debug_output_buffer, "Error: No command entered.", -1);
+        return;
+    }
+
+    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
+
+    // Split the user's command string
+    gchar **user_args = g_strsplit(command_text, " ", -1);
+    guint user_args_len = g_strv_length(user_args);
+
+    // Create the full argument vector: "adb", "-s", device_id, "shell", [user_args...], NULL
+    guint full_args_len = 4 + user_args_len;
+    gchar **cmd_args = g_new(gchar*, full_args_len + 1); // +1 for NULL terminator
+
+    cmd_args[0] = g_strdup("adb");
+    cmd_args[1] = g_strdup("-s");
+    cmd_args[2] = g_strdup(state->selected_device_id);
+    cmd_args[3] = g_strdup("shell");
+
+    for (guint i = 0; i < user_args_len; i++) {
+        cmd_args[4 + i] = g_strdup(user_args[i]);
+    }
+    cmd_args[full_args_len] = NULL;
+
+    g_strfreev(user_args); // Free the split array
+
+    g_print("Running debug command:");
+    for(guint i = 0; i < full_args_len; i++) {
+        g_print(" %s", cmd_args[i]);
+    }
+    g_print("\n");
+
+    gchar *stdout_str = NULL;
+    gchar *stderr_str = NULL;
+    gint exit_status;
+    GError *error = NULL;
+
+    g_spawn_sync(
+        NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
+        NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
+    );
+
+    // Free the dynamically constructed cmd_args
+    g_strfreev(cmd_args);
+
+    // Display output
+    GtkTextIter iter;
+    gtk_text_buffer_get_end_iter(state->debug_output_buffer, &iter);
+    gchar *header_msg = g_strdup_printf("Running: adb -s %s shell %s\n\n", state->selected_device_id, command_text);
+    gtk_text_buffer_insert(state->debug_output_buffer, &iter, header_msg, -1);
+    g_free(header_msg);
+
+    if (error) {
+        gchar *msg = g_strdup_printf("Failed to execute command: %s\n", error->message);
+        gtk_text_buffer_insert(state->debug_output_buffer, &iter, msg, -1);
+        g_free(msg);
+        g_error_free(error);
+    } else {
+        // Append STDOUT
+        if (stdout_str && *stdout_str != '\0') {
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "--- STDOUT ---\n", -1);
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, stdout_str, -1);
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "\n", -1);
+        }
+        // Append STDERR
+        if (stderr_str && *stderr_str != '\0') {
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "--- STDERR ---\n", -1);
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, stderr_str, -1);
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "\n", -1);
+        }
+        // Append Exit Status
+        gchar *status_msg = g_strdup_printf("\n--- Process finished with exit code: %d ---", WEXITSTATUS(exit_status));
+        gtk_text_buffer_insert(state->debug_output_buffer, &iter, status_msg, -1);
+        g_free(status_msg);
+    }
+
+    g_free(stdout_str);
+    g_free(stderr_str);
+    gtk_widget_set_sensitive(GTK_WIDGET(button), TRUE);
 }
 
 
@@ -1146,6 +1247,59 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_widget_set_vexpand(uninstalled_scrolled, TRUE);
 
     gtk_box_append(GTK_BOX(undo_page_box), uninstalled_scrolled);
+
+
+    // --- PAGE 3: DEBUG (NEW) ---
+    GtkWidget *debug_page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_widget_set_margin_start(debug_page_box, 10);
+    gtk_widget_set_margin_end(debug_page_box, 10);
+    gtk_widget_set_margin_top(debug_page_box, 10);
+    gtk_widget_set_margin_bottom(debug_page_box, 10);
+    
+    // Add "Debug" page to the stack
+    gtk_stack_add_titled(GTK_STACK(stack), debug_page_box, "debug", "Debug");
+
+    GtkWidget *debug_header = gtk_label_new("Custom ADB Shell Command");
+    gtk_widget_add_css_class(debug_header, "title-4");
+    gtk_label_set_xalign(GTK_LABEL(debug_header), 0.0);
+    gtk_box_append(GTK_BOX(debug_page_box), debug_header);
+
+    GtkWidget *debug_info_label = gtk_label_new("Enter the command to run via 'adb shell ...'. (e.g., 'pm list packages -f')");
+    gtk_label_set_xalign(GTK_LABEL(debug_info_label), 0.0);
+    gtk_widget_add_css_class(debug_info_label, "caption");
+    gtk_box_append(GTK_BOX(debug_page_box), debug_info_label);
+
+    // Command Entry HBox
+    GtkWidget *debug_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_widget_set_margin_top(debug_hbox, 5);
+    gtk_box_append(GTK_BOX(debug_page_box), debug_hbox);
+
+    state->debug_command_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(state->debug_command_entry), "e.g., pm list packages");
+    gtk_widget_set_hexpand(state->debug_command_entry, TRUE);
+    gtk_box_append(GTK_BOX(debug_hbox), state->debug_command_entry);
+
+    GtkWidget *debug_run_button = gtk_button_new_with_label("Run");
+    gtk_widget_add_css_class(debug_run_button, "suggested-action");
+    g_signal_connect(debug_run_button, "clicked", G_CALLBACK(on_run_debug_command_clicked), state);
+    gtk_box_append(GTK_BOX(debug_hbox), debug_run_button);
+
+    // Output Scrolled Window
+    GtkWidget *debug_output_scrolled = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(debug_output_scrolled, TRUE);
+    gtk_widget_set_margin_top(debug_output_scrolled, 10);
+    gtk_box_append(GTK_BOX(debug_page_box), debug_output_scrolled);
+
+    GtkWidget *debug_output_view = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(debug_output_view), FALSE);
+    gtk_text_view_set_monospace(GTK_TEXT_VIEW(debug_output_view), TRUE);
+    gtk_widget_set_margin_top(debug_output_view, 5);
+    gtk_widget_set_margin_bottom(debug_output_view, 5);
+    gtk_widget_set_margin_start(debug_output_view, 5);
+    gtk_widget_set_margin_end(debug_output_view, 5);
+    
+    state->debug_output_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(debug_output_view));
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(debug_output_scrolled), debug_output_view);
 
 
     // --- FINAL SETUP ---
