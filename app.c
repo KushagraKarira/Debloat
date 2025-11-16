@@ -89,6 +89,7 @@ static const PackageEntry SAMSUNG_APPS[] = {
     {"Facebook App Manager", "com.facebook.appmanager"},
     {"Game Home", "com.samsung.android.game.gamehome"},
     {"S Voice", "com.samsung.android.svoice"},
+    {"AppCloud //Spyware", "com.aura.oobe.samsung.gl"},
     {NULL, NULL} 
 };
 
@@ -309,14 +310,13 @@ static void show_welcome_dialog(GtkWindow *parent) {
     gtk_widget_set_margin_bottom(box, 12);
 
     const gchar *instructions = 
-        "To use this tool, you must enable **USB Debugging (ADB)** on your device.\n\n"
-        "**Wired Connection:**\n"
-        "1.  Go to **Settings** > **About Phone**.\n"
-        "2.  Tap on **Build Number** 7 times until you see 'You are now a developer!'.\n"
-        "3.  Go back to **Settings** > **System** > **Developer options**.\n"
-        "4.  Find and turn on **USB debugging**.\n"
+        "To use this tool, you must enable USB Debugging (ADB) on your device.\n\n"
+        "1.  Go to Settings > About Phone.\n"
+        "2.  Tap on Build Number 7 times until you see 'You are now a developer!'.\n"
+        "3.  Go back to Settings > System > Developer options.\n"
+        "4.  Find and turn on USB debugging.\n"
         "5.  Connect your phone to your computer via USB.\n"
-        "6.  A prompt will appear on your phone: 'Allow USB debugging?'. Check 'Always allow' and tap **OK**.";
+        "6.  A prompt will appear on your phone: 'Allow USB debugging?'. Check 'Always allow' and tap OK.";
 
     // Create a label that understands Pango markup (for **bold**)
     GtkWidget *label = gtk_label_new(instructions);
@@ -343,9 +343,9 @@ static void on_about_clicked(GtkButton *button, GtkWindow *parent) {
     
     // Set all the properties for the dialog
     adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(dialog), "Android Debloater");
-    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(dialog), "0.7 (Libadwaita)");
+    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(dialog), "0.7.1 (Libadwaita)");
     adw_about_dialog_set_developer_name(ADW_ABOUT_DIALOG(dialog), "Kushagra Karira");
-    adw_about_dialog_set_copyright(ADW_ABOUT_DIALOG(dialog), "© 2025 Kushagra Karira");
+    adw_about_dialog_set_copyright(ADW_ABOUT_DIALOG(dialog), "GPL-3.0 2019 Kushagra Karira");
     adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(dialog), "A GTK4/Libadwaita application for debloating Android devices using ADB.");
     adw_about_dialog_set_website(ADW_ABOUT_DIALOG(dialog), "https://kushagrakarira.com");
     adw_about_dialog_set_issue_url(ADW_ABOUT_DIALOG(dialog), "https://github.com/KushagraKarira/Debloat/issues");
