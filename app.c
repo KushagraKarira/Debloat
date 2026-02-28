@@ -14,6 +14,11 @@ typedef struct {
     const gchar *package_name; // Technical name (e.g., "com.android.browser")
 } PackageEntry;
 
+typedef struct {
+    const gchar *manufacturer_id;
+    const PackageEntry *packages;
+} ManufacturerPackages;
+
 /**
  * @brief Tracks the state of a package in the UI.
  */
@@ -234,6 +239,22 @@ static const PackageEntry JIO_APPS[] = {
     {NULL, NULL} 
 };
 
+static const ManufacturerPackages MANUFACTURER_PACKAGE_MAP[] = {
+    {"Samsung", SAMSUNG_APPS},
+    {"Xiaomi", XIAOMI_APPS},
+    {"Vivo", VIVO_APPS},
+    {"TCL", TCL_APPS},
+    {"Sony", SONY_APPS},
+    {"RealMe", REALME_APPS},
+    {"Oppo", OPPO_APPS},
+    {"OnePlus", ONEPLUS_APPS},
+    {"Nokia", NOKIA_APPS},
+    {"Motorola", MOTOROLA_APPS},
+    {"ZTE", ZTE_APPS},
+    {"Jio", JIO_APPS},
+    {NULL, NULL}
+};
+
 
 // --- HELPER FUNCTIONS ---
 
@@ -245,6 +266,20 @@ static void app_item_free(AppItem *item) {
     g_free(item->package_name);
     g_free(item->display_name);
     g_free(item);
+}
+
+static const PackageEntry *get_packages_for_manufacturer(const gchar *manufacturer_id) {
+    if (!manufacturer_id) {
+        return NULL;
+    }
+
+    for (gint i = 0; MANUFACTURER_PACKAGE_MAP[i].manufacturer_id != NULL; i++) {
+        if (g_strcmp0(MANUFACTURER_PACKAGE_MAP[i].manufacturer_id, manufacturer_id) == 0) {
+            return MANUFACTURER_PACKAGE_MAP[i].packages;
+        }
+    }
+
+    return NULL;
 }
 
 /**
@@ -349,7 +384,7 @@ static void on_about_clicked(GtkButton *button, GtkWindow *parent) {
     adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(dialog), "A GTK4/Libadwaita application for debloating Android devices using ADB.");
     adw_about_dialog_set_website(ADW_ABOUT_DIALOG(dialog), "https://kushagrakarira.com");
     adw_about_dialog_set_issue_url(ADW_ABOUT_DIALOG(dialog), "https://github.com/KushagraKarira/Debloat/issues");
-    adw_about_dialog_add_link(ADW_ABOUT_DIALOG(dialog), "Project Link", "https.github.com/KushagraKarira/Debloat");
+    adw_about_dialog_add_link(ADW_ABOUT_DIALOG(dialog), "Project Link", "https://github.com/KushagraKarira/Debloat");
     
     // Present the dialog modally over the parent window
     adw_dialog_present(dialog, GTK_WIDGET(parent));
@@ -905,7 +940,7 @@ static void update_device_list(AppState *state) {
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row_widget), hbox);
 
         // Store the category ID (e.g., "Samsung") as data on the row
-        g_object_set_data(G_OBJECT(row_widget), "device-id", g_strdup(mock_ids[i]));
+        g_object_set_data_full(G_OBJECT(row_widget), "device-id", g_strdup(mock_ids[i]), g_free);
 
         gtk_list_box_append(GTK_LIST_BOX(state->device_list_box), row_widget);
 
@@ -936,38 +971,7 @@ static void update_app_list(AppState *state) {
     g_list_free_full(state->app_list, (GDestroyNotify)app_item_free);
     state->app_list = NULL;
 
-    // This large if/else block maps the category ID to the correct static array.
-    // A GHashTable could also be used, but this is simple and clear.
-    const PackageEntry *packages_to_load = NULL;
-    const gchar *category_id = state->selected_manufacturer_id;
-
-    if (category_id) {
-        if (g_strcmp0(category_id, "Samsung") == 0) {
-            packages_to_load = SAMSUNG_APPS;
-        } else if (g_strcmp0(category_id, "Xiaomi") == 0) {
-            packages_to_load = XIAOMI_APPS;
-        } else if (g_strcmp0(category_id, "Vivo") == 0) {
-            packages_to_load = VIVO_APPS;
-        } else if (g_strcmp0(category_id, "TCL") == 0) {
-            packages_to_load = TCL_APPS;
-        } else if (g_strcmp0(category_id, "Sony") == 0) {
-            packages_to_load = SONY_APPS;
-        } else if (g_strcmp0(category_id, "RealMe") == 0) {
-            packages_to_load = REALME_APPS;
-        } else if (g_strcmp0(category_id, "Oppo") == 0) {
-            packages_to_load = OPPO_APPS;
-        } else if (g_strcmp0(category_id, "OnePlus") == 0) {
-            packages_to_load = ONEPLUS_APPS;
-        } else if (g_strcmp0(category_id, "Nokia") == 0) {
-            packages_to_load = NOKIA_APPS;
-        } else if (g_strcmp0(category_id, "Motorola") == 0) {
-            packages_to_load = MOTOROLA_APPS;
-        } else if (g_strcmp0(category_id, "ZTE") == 0) {
-            packages_to_load = ZTE_APPS;
-        } else if (g_strcmp0(category_id, "Jio") == 0) {
-            packages_to_load = JIO_APPS;
-        }
-    }
+    const PackageEntry *packages_to_load = get_packages_for_manufacturer(state->selected_manufacturer_id);
     
     if (!packages_to_load) {
         gtk_label_set_text(GTK_LABEL(state->status_label), "Select a device category to view available bloatware.");
