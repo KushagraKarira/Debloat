@@ -6,23 +6,17 @@
 Take control of your phone, free up storage, memory and remove spyware and malware from your device.
 
 ## How to use :
-
-```sh
-wget https://github.com/KushagraKarira/Debloat/archive/refs/heads/master.zip && unzip master.zip && cd Debloat-master && chmod +x Android.sh && ./Android.sh'
-```
-
-## BETA testing
-./GTK4/debloater for a GUI interface.
-Been a long due, feel free to open issues for suggestions.
+1. Download the debloater file from release page or from repo.
+2. 'chmod +x debloater' or manually make the file executable.
+3. ./debloater or just run
+4. Feedback ??, in the issues section
 
 ### ToDo
 - [x] GUI Version
 - [x] Add more devices and apps
 - [x] Github Automated Release
-- [ ] Appimage
-- [ ] MacOS and Windows support
+- [x] Appimage
 - [x] UNDO changes
-- [ ] Search and Install apps
 
 ## Screenshots
 <img src=About.png>
