@@ -25,7 +25,7 @@ jobs:
     # Adjust 'GTK4/app.c' if your file is in a different folder
     - name: Compile
       run: |
-        gcc -o debloater GTK4/app.c $(pkg-config --cflags --libs gtk4)
+        gcc -o debloater app.c $(pkg-config --cflags --libs gtk4)
 
     # 4. Save the executable so you can download it from GitHub Actions
     - name: Upload Build Artifact
