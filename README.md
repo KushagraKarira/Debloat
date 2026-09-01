@@ -25,6 +25,7 @@ Been a long due, feel free to open issues for suggestions.
 - [ ] Search and Install apps
 
 ## Screenshots
+<img src=About.png>
 <img src=Screenshot.png>
 
 ## Contributors
