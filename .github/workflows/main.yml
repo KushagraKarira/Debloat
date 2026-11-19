@@ -25,7 +25,7 @@ jobs:
       - name: Compile
 	run: |
           glib-compile-resources --target=resources.c --generate-source resources.xml
-	  gcc -Wall -O2 -o debloater app.c resources.c $(pkg-config --cflags --libs gtk4 libadwaita-1)
+		  gcc -Wall -O2 -o debloater app.c resources.c $(pkg-config --cflags --libs gtk4 libadwaita-1)
 
       # 4. Upload build binary as an artifact
       - name: Upload Build Artifact
