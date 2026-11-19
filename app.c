@@ -12,12 +12,6 @@ typedef enum {
 } RiskLevel;
 
 typedef struct {
-    const gchar *display_name;
-    const gchar *package_name;
-    RiskLevel risk;
-} PackageEntry;
-
-typedef struct {
     gchar *package_name;
     gchar *display_name;
     RiskLevel risk;
@@ -48,6 +42,7 @@ typedef struct {
     // State variables
     gchar *selected_device_id;
     gchar *selected_manufacturer_id;
+    GKeyFile *packages_key_file;
     GList *app_list;
     GHashTable *installed_packages_set; // gchar* package_name -> GINT_TO_POINTER(1)
 
@@ -90,189 +85,90 @@ static void refresh_app_install_badges(AppState *state);
 static void on_search_changed(GtkSearchEntry *entry, AppState *state);
 static void start_next_debloat_item(AppState *state);
 
-// --- PACKAGE DATA (Bloatware lists) ---
+// --- PACKAGE DATA LOADER (packages.ini) ---
 
-static const PackageEntry SAMSUNG_APPS[] = {
-    {"Samsung Message", "com.samsung.android.messaging", RISK_SAFE},
-    {"Windows Link", "com.microsoft.appmanager", RISK_SAFE},
-    {"Samsung E-Commerce", "com.samsung.ecomm.global.in", RISK_SAFE},
-    {"My Galaxy", "com.mygalaxy", RISK_SAFE},
-    {"Smart Switch", "com.sec.android.easyMover", RISK_SAFE},
-    {"OneDrive", "com.microsoft.skydrive", RISK_SAFE},
-    {"Opera Max VPN", "com.opera.max.oem", RISK_SAFE},
-    {"Samsung Apps Store", "com.sec.android.app.samsungapps", RISK_SAFE},
-    {"Bixby Agent", "com.samsung.android.bixby.agent", RISK_SAFE},
-    {"Facebook App Installer", "com.facebook.system", RISK_SAFE},
-    {"Facebook App Manager", "com.facebook.appmanager", RISK_SAFE},
-    {"Game Home", "com.samsung.android.game.gamehome", RISK_SAFE},
-    {"S Voice", "com.samsung.android.svoice", RISK_SAFE},
-    {"AppCloud GL", "com.aura.oobe.samsung.gl", RISK_SAFE},
-    {"AppCloud", "com.aura.oobe.samsung", RISK_SAFE},
-    {NULL, NULL, RISK_SAFE}
-};
+static gchar *resolve_packages_ini_path(void) {
+    const gchar *env_path = g_getenv("DEBLOATER_PACKAGES_INI");
+    if (env_path && g_file_test(env_path, G_FILE_TEST_IS_REGULAR)) {
+        return g_strdup(env_path);
+    }
 
-static const PackageEntry XIAOMI_APPS[] = {
-    {"Mi Browser", "com.android.browser", RISK_SAFE},
-    {"Mi Global Browser", "com.mi.globalbrowser", RISK_SAFE},
-    {"Mi Wallet India", "com.mipay.wallet.in", RISK_SAFE},
-    {"Mi Analytics", "com.miui.analytics", RISK_SAFE},
-    {"Main System Advertising (MSA)", "com.miui.msa.global", RISK_SAFE},
-    {"Mi Video", "com.miui.video", RISK_SAFE},
-    {"Xiaomi Shop", "com.xiaomi.shop", RISK_SAFE},
-    {"Xiaomi O2O", "com.xiaomi.o2o", RISK_SAFE},
-    {"Xiaomi Pass", "com.xiaomi.pass", RISK_SAFE},
-    {NULL, NULL, RISK_SAFE}
-};
+    if (g_file_test("packages.ini", G_FILE_TEST_IS_REGULAR)) {
+        return g_strdup("packages.ini");
+    }
 
-static const PackageEntry VIVO_APPS[] = {
-    {"Vivo Browser", "com.vivo.browser", RISK_SAFE},
-    {"Vivo App Store", "com.vivo.appstore", RISK_SAFE},
-    {"BBK Cloud", "com.bbk.cloud", RISK_SAFE},
-    {"Vivo Gallery", "com.vivo.gallery", RISK_SAFE},
-    {"Vivo Weather", "com.vivo.weather", RISK_SAFE},
-    {"Facebook System", "com.facebook.system", RISK_SAFE},
-    {"Vivo Easy Share", "com.vivo.easyshare", RISK_SAFE},
-    {"Vivo Hiboard", "com.vivo.hiboard", RISK_SAFE},
-    {"MTK Logger", "com.mediatek.mtklogger", RISK_SAFE},
-    {"Vivo Assistant", "com.vivo.assistant", RISK_SAFE},
-    {NULL, NULL, RISK_SAFE}
-};
+    gchar *exe_path = g_file_read_link("/proc/self/exe", NULL);
+    if (exe_path) {
+        gchar *exe_dir = g_path_get_dirname(exe_path);
+        gchar *candidate = g_build_filename(exe_dir, "packages.ini", NULL);
+        if (g_file_test(candidate, G_FILE_TEST_IS_REGULAR)) {
+            g_free(exe_dir);
+            g_free(exe_path);
+            return candidate;
+        }
+        g_free(candidate);
 
-static const PackageEntry TCL_APPS[] = {
-    {"TCL Compass", "com.tcl.compass", RISK_SAFE},
-    {"Demo Page", "com.tcl.demopage", RISK_SAFE},
-    {"FM Radio", "com.tcl.fmradio", RISK_SAFE},
-    {"Face Unlock", "com.tct.faceunlock", RISK_SAFE},
-    {"Game Mode", "com.tct.gamemode", RISK_SAFE},
-    {"TCL Music", "com.tct.music", RISK_SAFE},
-    {"Privacy Mode", "com.tct.privacymode", RISK_SAFE},
-    {"Retail Demo", "com.tct.retaildemo", RISK_SAFE},
-    {"Smart Cloud", "com.tct.smart.cloud", RISK_SAFE},
-    {"Smart Drive Mode", "com.tct.smart.drivemode", RISK_SAFE},
-    {NULL, NULL, RISK_SAFE}
-};
+        candidate = g_build_filename(exe_dir, "..", "share", "debloater", "packages.ini", NULL);
+        g_free(exe_dir);
+        g_free(exe_path);
+        if (g_file_test(candidate, G_FILE_TEST_IS_REGULAR)) {
+            return candidate;
+        }
+        g_free(candidate);
+    }
 
-static const PackageEntry SONY_APPS[] = {
-    {"TV SideView Video", "com.sony.tvsideview.videoph", RISK_SAFE},
-    {"Creative effect", "com.sonyericsson.android.addoncamera.artfilter", RISK_SAFE},
-    {"Usage Stats", "com.sonyericsson.idd.agent", RISK_SAFE},
-    {"Backup/Restore", "com.sonyericsson.mtp.extension.backuprestore", RISK_SAFE},
-    {"Sony Music", "com.sonyericsson.music", RISK_SAFE},
-    {"Sony Themes", "com.sonymobile.themes.xperialoops2", RISK_SAFE},
-    {"Xperia Lounge", "com.sonymobile.xperialounge.services", RISK_SAFE},
-    {"Xperia Wallpaper", "com.sonymobile.xperiaxlivewallpaper", RISK_SAFE},
-    {"Xperia Transfer", "com.sonymobile.xperiatransfermobile", RISK_SAFE},
-    {"Sony Weather", "com.sonymobile.xperiaweather", RISK_SAFE},
-    {NULL, NULL, RISK_SAFE}
-};
+    const gchar *appdir = g_getenv("APPDIR");
+    if (appdir) {
+        const gchar *appdir_rel[] = { "usr/share/debloater/packages.ini", "packages.ini", NULL };
+        for (int i = 0; appdir_rel[i] != NULL; i++) {
+            gchar *candidate = g_build_filename(appdir, appdir_rel[i], NULL);
+            if (g_file_test(candidate, G_FILE_TEST_IS_REGULAR)) {
+                return candidate;
+            }
+            g_free(candidate);
+        }
+    }
 
-static const PackageEntry REALME_APPS[] = {
-    {"Android Setup", "com.google.android.setupwizard", RISK_CAUTION},
-    {"DocVault", "com.os.docvault", RISK_SAFE},
-    {"HeyTap Cloud", "com.heytap.cloud", RISK_SAFE},
-    {"Music (Oppo)", "com.oppo.music", RISK_SAFE},
-    {"Video (ColorOS)", "com.coloros.video", RISK_SAFE},
-    {"Clone Phone", "com.coloros.backuprestore", RISK_SAFE},
-    {"Feedback Toolkit", "com.oppo.logkit", RISK_SAFE},
-    {"My Realme (User Center)", "com.heytap.usercenter", RISK_SAFE},
-    {"Opera News", "com.opera.branding.news", RISK_SAFE},
-    {"Play Movies & TV", "com.google.android.videos", RISK_SAFE},
-    {NULL, NULL, RISK_SAFE}
-};
+    gchar *user_cfg = g_build_filename(g_get_user_data_dir(), "android-debloater", "packages.ini", NULL);
+    if (g_file_test(user_cfg, G_FILE_TEST_IS_REGULAR)) {
+        return user_cfg;
+    }
+    g_free(user_cfg);
 
-static const PackageEntry OPPO_APPS[] = {
-    {"Compass App", "com.coloros.compass2", RISK_SAFE},
-    {"Video App", "com.coloros.video", RISK_SAFE},
-    {"Photos App (Gallery)", "com.coloros.gallery3d", RISK_SAFE},
-    {"Oppo Cloud", "com.coloros.cloud", RISK_SAFE},
-    {"Find My Phone", "com.coloros.findmyphone", RISK_CAUTION},
-    {"Game Space", "com.coloros.gamespace", RISK_SAFE},
-    {"Oppo App Market", "com.oppo.market", RISK_SAFE},
-    {"Oppo Music", "com.oppo.music", RISK_SAFE},
-    {"Oppo Wallet", "com.coloros.wallet", RISK_SAFE},
-    {"Find My Phone Client", "com.realme.findphone.client2", RISK_CAUTION},
-    {NULL, NULL, RISK_SAFE}
-};
+    const gchar *const *sys_dirs = g_get_system_data_dirs();
+    if (sys_dirs) {
+        for (int i = 0; sys_dirs[i] != NULL; i++) {
+            gchar *candidate = g_build_filename(sys_dirs[i], "debloater", "packages.ini", NULL);
+            if (g_file_test(candidate, G_FILE_TEST_IS_REGULAR)) {
+                return candidate;
+            }
+            g_free(candidate);
+        }
+    }
 
-static const PackageEntry ONEPLUS_APPS[] = {
-    {"Shot On OnePlus", "cn.oneplus.photos", RISK_SAFE},
-    {"OnePlus Switch (Backup)", "com.oneplus.backuprestore", RISK_SAFE},
-    {"Zen Mode", "com.oneplus.brickmode", RISK_SAFE},
-    {"Game Space", "com.oneplus.gamespace", RISK_SAFE},
-    {"Health Check", "com.oneplus.healthcheck", RISK_SAFE},
-    {"Community Forum", "net.oneplus.forums", RISK_SAFE},
-    {"Cricket Scores", "net.oneplus.opsports", RISK_SAFE},
-    {"OnePlus Weather", "net.oneplus.weather", RISK_SAFE},
-    {"OnePlus Widget", "net.oneplus.widget", RISK_SAFE},
-    {NULL, NULL, RISK_SAFE}
-};
+    return NULL;
+}
 
-static const PackageEntry NOKIA_APPS[] = {
-    {"Data Go", "com.hmdglobal.datago", RISK_SAFE},
-    {"My Phone Support", "com.hmdglobal.support", RISK_SAFE},
-    {"APR Upload Service", "com.evenwell.AprUploadService", RISK_SAFE},
-    {"Power Saving", "com.evenwell.PowerSaving", RISK_CAUTION},
-    {"Smart Switch", "com.evenwell.smartswitch", RISK_SAFE},
-    {"Traffic Monitor", "com.evenwell.trafficmonitor", RISK_SAFE},
-    {"Weather App", "com.evenwell.Weather", RISK_SAFE},
-    {"Weather Widget", "com.evenwell.weather.widget", RISK_SAFE},
-    {NULL, NULL, RISK_SAFE}
-};
+static void load_packages_ini(AppState *state) {
+    gchar *path = resolve_packages_ini_path();
+    if (!path) {
+        g_warning("Could not locate packages.ini");
+        return;
+    }
 
-static const PackageEntry MOTOROLA_APPS[] = {
-    {"Lenovo ID", "com.lenovo.lsf.user", RISK_SAFE},
-    {"Rescue Security", "com.lmi.motorola.rescuesecurity", RISK_SAFE},
-    {"FM Radio", "com.motorola.android.fmradio", RISK_SAFE},
-    {"OMA Provisioning", "com.motorola.android.provisioning", RISK_CAUTION},
-    {"Face Unlock Agent", "com.motorola.faceunlocktrustagent", RISK_SAFE},
-    {"Invisible Net", "com.motorola.invisiblenet", RISK_SAFE},
-    {"Motosignature", "com.motorola.motosignature.app", RISK_SAFE},
-    {"Carrier Provisioning", "com.motorola.omadm.service", RISK_CAUTION},
-    {"System Package", "com.motorola.pgmsystem2", RISK_CAUTION},
-    {"System Server", "com.motorola.systemserver", RISK_CAUTION},
-    {"Moto Care", "com.motorola.motocare", RISK_SAFE},
-    {"Moto Notification CCC", "com.motorola.ccc.notification", RISK_SAFE},
-    {"Moto DIMO Telemetry", "com.motorola.dimo", RISK_SAFE},
-    {"Moto Spaces", "com.motorola.spaces", RISK_SAFE},
-    {"Moto AI Services", "com.motorola.aiservices", RISK_SAFE},
-    {"Moto Security Hub", "com.motorola.securityhub", RISK_SAFE},
-    {"Moto Browser/Partner Apps", "com.motorola.brapps", RISK_SAFE},
-    {"Moto Game Mode", "com.motorola.gamemode", RISK_SAFE},
-    {"InMobi Weather", "com.inmobi.weather", RISK_SAFE},
-    {"Moto Hub (Gestures/Display)", "com.motorola.moto", RISK_CAUTION},
-    {NULL, NULL, RISK_SAFE}
-};
+    GKeyFile *kf = g_key_file_new();
+    GError *error = NULL;
+    if (!g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, &error)) {
+        g_warning("Failed to load %s: %s", path, error ? error->message : "unknown error");
+        if (error) g_error_free(error);
+        g_key_file_free(kf);
+        g_free(path);
+        return;
+    }
 
-static const PackageEntry LENOVO_APPS[] = {
-    {"Lenovo ID", "com.lenovo.lsf.user", RISK_SAFE},
-    {"Lenovo AnyShare", "com.lenovo.anyshare.gps", RISK_SAFE},
-    {"Lenovo Launcher", "com.lenovo.launcher", RISK_CAUTION},
-    {"Lenovo Tab/Device Center", "com.lenovo.tab.devicecenter", RISK_SAFE},
-    {"Lenovo Smart Connect / Project Unity", "com.motorola.cn.projectunity", RISK_SAFE},
-    {"Lenovo Bug Report", "com.lenovo.leos.appstore.bugreport", RISK_SAFE},
-    {"Lenovo Feedback", "com.lenovo.feedback", RISK_SAFE},
-    {"Lenovo Partner/Browser", "com.lenovo.browser.hd", RISK_SAFE},
-    {NULL, NULL, RISK_SAFE}
-};
-
-static const PackageEntry ZTE_APPS[] = {
-    {"ZTE Voice Assistant", "com.zte.assistant", RISK_SAFE},
-    {"ZTE Weather", "com.zte.weather", RISK_SAFE},
-    {NULL, NULL, RISK_SAFE}
-};
-
-static const PackageEntry JIO_APPS[] = {
-    {"Remote Control Service", "com.communitake.remotecontrolservice", RISK_SAFE},
-    {"Factory Monitor (STB)", "com.sdmc.factorymonitor", RISK_CAUTION},
-    {"PVOD Update Service", "com.iwedia.pvodupdateservice", RISK_SAFE},
-    {"Remote Care RIL (STB)", "com.jio.stbremotecare.ril", RISK_CAUTION},
-    {"STB Ad Service", "com.jio.stbadservice", RISK_SAFE},
-    {"Log Service (STB)", "com.rjil.jiostblogservice", RISK_SAFE},
-    {"TIF Extn (STB)", "com.jio.stb.tifextn", RISK_CAUTION},
-    {"TR069 Client", "insight.tr069.client", RISK_CAUTION},
-    {"Managed Provisioning", "com.android.managedprovisioning", RISK_CAUTION},
-    {NULL, NULL, RISK_SAFE}
-};
+    state->packages_key_file = kf;
+    g_free(path);
+}
 
 // --- HELPER FUNCTIONS ---
 
@@ -1348,36 +1244,48 @@ static void update_app_list(AppState *state) {
     g_list_free_full(state->app_list, (GDestroyNotify)app_item_free);
     state->app_list = NULL;
 
-    const PackageEntry *packages_to_load = NULL;
     const gchar *category_id = state->selected_manufacturer_id;
-
-    if (category_id) {
-        if (g_strcmp0(category_id, "Samsung") == 0) packages_to_load = SAMSUNG_APPS;
-        else if (g_strcmp0(category_id, "Xiaomi") == 0) packages_to_load = XIAOMI_APPS;
-        else if (g_strcmp0(category_id, "Vivo") == 0) packages_to_load = VIVO_APPS;
-        else if (g_strcmp0(category_id, "TCL") == 0) packages_to_load = TCL_APPS;
-        else if (g_strcmp0(category_id, "Sony") == 0) packages_to_load = SONY_APPS;
-        else if (g_strcmp0(category_id, "RealMe") == 0) packages_to_load = REALME_APPS;
-        else if (g_strcmp0(category_id, "Oppo") == 0) packages_to_load = OPPO_APPS;
-        else if (g_strcmp0(category_id, "OnePlus") == 0) packages_to_load = ONEPLUS_APPS;
-        else if (g_strcmp0(category_id, "Nokia") == 0) packages_to_load = NOKIA_APPS;
-        else if (g_strcmp0(category_id, "Motorola") == 0) packages_to_load = MOTOROLA_APPS;
-        else if (g_strcmp0(category_id, "Lenovo") == 0) packages_to_load = LENOVO_APPS;
-        else if (g_strcmp0(category_id, "ZTE") == 0) packages_to_load = ZTE_APPS;
-        else if (g_strcmp0(category_id, "Jio") == 0) packages_to_load = JIO_APPS;
+    if (!category_id || !state->packages_key_file ||
+        !g_key_file_has_group(state->packages_key_file, category_id)) {
+        gtk_label_set_text(
+            GTK_LABEL(state->device_status_label),
+            state->packages_key_file
+                ? "Select a manufacturer to view packages."
+                : "Error: Could not load packages.ini."
+        );
+        return;
     }
 
-    if (!packages_to_load) {
+    gsize num_keys = 0;
+    gchar **keys = g_key_file_get_keys(state->packages_key_file, category_id, &num_keys, NULL);
+    if (!keys) {
         gtk_label_set_text(GTK_LABEL(state->device_status_label), "Select a manufacturer to view packages.");
         return;
     }
 
-    for (int i = 0; packages_to_load[i].display_name != NULL; i++) {
+    for (gsize i = 0; i < num_keys; i++) {
+        gchar *raw_val = g_key_file_get_string(state->packages_key_file, category_id, keys[i], NULL);
+        if (!raw_val) continue;
+
+        gchar **parts = g_strsplit(raw_val, "|", 2);
+        const gchar *display_name = (parts[0] && *parts[0]) ? parts[0] : keys[i];
+        RiskLevel risk = RISK_SAFE;
+        if (parts[1]) {
+            gchar *risk_str = g_strstrip(g_strdup(parts[1]));
+            if (g_ascii_strcasecmp(risk_str, "caution") == 0) {
+                risk = RISK_CAUTION;
+            }
+            g_free(risk_str);
+        }
+
         AppItem *item = g_new0(AppItem, 1);
-        item->display_name = g_strdup(packages_to_load[i].display_name);
-        item->package_name = g_strdup(packages_to_load[i].package_name);
-        item->risk = packages_to_load[i].risk;
+        item->display_name = g_strdup(display_name);
+        item->package_name = g_strdup(keys[i]);
+        item->risk = risk;
         item->is_selected = FALSE;
+
+        g_strfreev(parts);
+        g_free(raw_val);
 
         GtkWidget *row_widget = gtk_list_box_row_new();
         GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
@@ -1430,6 +1338,8 @@ static void update_app_list(AppState *state) {
         state->app_list = g_list_append(state->app_list, item);
     }
 
+    g_strfreev(keys);
+
     refresh_app_install_badges(state);
     update_action_bar_visibility(state);
 }
@@ -1439,6 +1349,7 @@ static void update_app_list(AppState *state) {
 static void activate(GtkApplication *app, AppState *state) {
     state->selected_device_id = NULL;
     state->selected_manufacturer_id = g_strdup("Samsung");
+    state->packages_key_file = NULL;
     state->app_list = NULL;
     state->uninstalled_app_list = NULL;
     state->installed_packages_set = NULL;
@@ -1654,6 +1565,7 @@ static void activate(GtkApplication *app, AppState *state) {
     state->debug_output_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(debug_output_view));
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(debug_scrolled), debug_output_view);
 
+    load_packages_ini(state);
     update_device_list(state);
     populate_adb_devices_async(state);
 
@@ -1670,6 +1582,9 @@ static void on_shutdown(GtkApplication *app, gpointer user_data) {
     g_free(app_state->selected_manufacturer_id);
     g_list_free(app_state->pending_debloat_queue);
 
+    if (app_state->packages_key_file) {
+        g_key_file_free(app_state->packages_key_file);
+    }
     if (app_state->installed_packages_set) {
         g_hash_table_destroy(app_state->installed_packages_set);
     }
