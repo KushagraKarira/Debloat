@@ -6,59 +6,48 @@
 
 // --- STRUCTS AND DATA MANAGEMENT ---
 
-/**
- * @brief Defines a single uninstallable package.
- */
 typedef struct {
-    const gchar *display_name; // User-friendly name (e.g., "Mi Browser")
-    const gchar *package_name; // Technical name (e.g., "com.android.browser")
+    const gchar *display_name;
+    const gchar *package_name;
 } PackageEntry;
 
-/**
- * @brief Tracks the state of a package in the UI.
- */
 typedef struct {
     gchar *package_name;
     gchar *display_name;
-    gboolean is_selected;             // Is the checkbox ticked?
-    GtkWidget *check_button;          // Reference to the check button
-    GtkWidget *main_list_row;         // Reference to the row in the "Debloat" list
-    GtkWidget *uninstalled_list_row; // Reference to the row in the "Undo" list
+    gboolean is_selected;
+    GtkWidget *check_button;
+    GtkWidget *main_list_row;
+    GtkWidget *uninstalled_list_row;
 } AppItem;
 
-/**
- * @brief Holds all global state for the application.
- */
 typedef struct {
-    AdwApplicationWindow *window; // The main application window
-    GtkWidget *device_list_box;   // Left-side list of manufacturers
-    GtkWidget *app_list_box;      // Right-side list of apps to debloat
-    GtkWidget *action_bar;        // Bottom bar with "Remove" button
-    GtkWidget *debloat_button;    // The "Remove" button
-    GtkWidget *status_label;      // Label inside the action_bar
-    GtkWidget *search_entry;      // Search entry for filtering apps
+    AdwApplicationWindow *window;
+    GtkWidget *device_list_box;
+    GtkWidget *app_list_box;
+    GtkWidget *action_bar;
+    GtkWidget *debloat_button;
+    GtkWidget *status_label;
+    GtkWidget *search_entry;
 
     // ADB Device selection
-    GtkWidget *device_dropdown;     // Dropdown to select a connected device
-    GtkStringList *device_model;    // Data model for the device_dropdown
-    GtkWidget *device_status_label; // Label under the dropdown for feedback
+    GtkWidget *device_dropdown;
+    GtkStringList *device_model;
+    GtkWidget *device_status_label;
 
     // State variables
-    gchar *selected_device_id;        // The *real* serial of the selected device (e.g., "ABC12345")
-    gchar *selected_manufacturer_id;  // The *category* selected (e.g., "Samsung")
-    GList *app_list;                  // GList of AppItem* for the "Debloat" page
-    
+    gchar *selected_device_id;
+    gchar *selected_manufacturer_id;
+    GList *app_list;
+
     // "Undo" page state
-    GList *uninstalled_app_list;      // GList of AppItem* for the "Undo" page
-    GtkWidget *uninstalled_list_box;  // UI list for the "Undo" page
+    GList *uninstalled_app_list;
+    GtkWidget *uninstalled_list_box;
 
     // "Debug" page widgets
-    GtkWidget *debug_command_entry;   // Text entry for custom commands
-    GtkTextBuffer *debug_output_buffer; // Text buffer for command output
-
+    GtkWidget *debug_command_entry;
+    GtkTextBuffer *debug_output_buffer;
 } AppState;
 
-// Global state instance, initialized in main()
 static AppState *app_state = NULL;
 
 // --- FUNCTION PROTOTYPES ---
@@ -73,7 +62,6 @@ static void show_welcome_dialog(GtkWindow *parent);
 static void on_run_debug_command_clicked(GtkButton *button, AppState *state);
 static void on_refresh_devices_clicked(GtkButton *button, AppState *state);
 static void detect_and_select_manufacturer(AppState *state);
-
 
 // --- PACKAGE DATA (Bloatware lists) ---
 
@@ -92,8 +80,8 @@ static const PackageEntry SAMSUNG_APPS[] = {
     {"Game Home", "com.samsung.android.game.gamehome"},
     {"S Voice", "com.samsung.android.svoice"},
     {"AppCloud GL", "com.aura.oobe.samsung.gl"},
-    {"AppCloud", "com.aura.oobe.samsung "},
-    {NULL, NULL} 
+    {"AppCloud", "com.aura.oobe.samsung"},
+    {NULL, NULL}
 };
 
 static const PackageEntry XIAOMI_APPS[] = {
@@ -106,7 +94,7 @@ static const PackageEntry XIAOMI_APPS[] = {
     {"Xiaomi Shop", "com.xiaomi.shop"},
     {"Xiaomi O2O", "com.xiaomi.o2o"},
     {"Xiaomi Pass", "com.xiaomi.pass"},
-    {NULL, NULL} 
+    {NULL, NULL}
 };
 
 static const PackageEntry VIVO_APPS[] = {
@@ -120,7 +108,7 @@ static const PackageEntry VIVO_APPS[] = {
     {"Vivo Hiboard", "com.vivo.hiboard"},
     {"MTK Logger", "com.mediatek.mtklogger"},
     {"Vivo Assistant", "com.vivo.assistant"},
-    {NULL, NULL} 
+    {NULL, NULL}
 };
 
 static const PackageEntry TCL_APPS[] = {
@@ -134,7 +122,7 @@ static const PackageEntry TCL_APPS[] = {
     {"Retail Demo", "com.tct.retaildemo"},
     {"Smart Cloud", "com.tct.smart.cloud"},
     {"Smart Drive Mode", "com.tct.smart.drivemode"},
-    {NULL, NULL} 
+    {NULL, NULL}
 };
 
 static const PackageEntry SONY_APPS[] = {
@@ -148,7 +136,7 @@ static const PackageEntry SONY_APPS[] = {
     {"Xperia Wallpaper", "com.sonymobile.xperiaxlivewallpaper"},
     {"Xperia Transfer", "com.sonymobile.xperiatransfermobile"},
     {"Sony Weather", "com.sonymobile.xperiaweather"},
-    {NULL, NULL} 
+    {NULL, NULL}
 };
 
 static const PackageEntry REALME_APPS[] = {
@@ -162,7 +150,7 @@ static const PackageEntry REALME_APPS[] = {
     {"My Realme (User Center)", "com.heytap.usercenter"},
     {"Opera News", "com.opera.branding.news"},
     {"Play Movies & TV", "com.google.android.videos"},
-    {NULL, NULL} 
+    {NULL, NULL}
 };
 
 static const PackageEntry OPPO_APPS[] = {
@@ -176,7 +164,7 @@ static const PackageEntry OPPO_APPS[] = {
     {"Oppo Music", "com.oppo.music"},
     {"Oppo Wallet", "com.coloros.wallet"},
     {"Find My Phone Client", "com.realme.findphone.client2"},
-    {NULL, NULL} 
+    {NULL, NULL}
 };
 
 static const PackageEntry ONEPLUS_APPS[] = {
@@ -189,7 +177,7 @@ static const PackageEntry ONEPLUS_APPS[] = {
     {"Cricket Scores", "net.oneplus.opsports"},
     {"OnePlus Weather", "net.oneplus.weather"},
     {"OnePlus Widget", "net.oneplus.widget"},
-    {NULL, NULL} 
+    {NULL, NULL}
 };
 
 static const PackageEntry NOKIA_APPS[] = {
@@ -201,7 +189,7 @@ static const PackageEntry NOKIA_APPS[] = {
     {"Traffic Monitor", "com.evenwell.trafficmonitor"},
     {"Weather App", "com.evenwell.Weather"},
     {"Weather Widget", "com.evenwell.weather.widget"},
-    {NULL, NULL} 
+    {NULL, NULL}
 };
 
 static const PackageEntry MOTOROLA_APPS[] = {
@@ -215,13 +203,35 @@ static const PackageEntry MOTOROLA_APPS[] = {
     {"Carrier Provisioning", "com.motorola.omadm.service"},
     {"System Package", "com.motorola.pgmsystem2"},
     {"System Server", "com.motorola.systemserver"},
-    {NULL, NULL} 
+    {"Moto Care", "com.motorola.motocare"},
+    {"Moto Notification CCC", "com.motorola.ccc.notification"},
+    {"Moto DIMO Telemetry", "com.motorola.dimo"},
+    {"Moto Spaces", "com.motorola.spaces"},
+    {"Moto AI Services", "com.motorola.aiservices"},
+    {"Moto Security Hub", "com.motorola.securityhub"},
+    {"Moto Browser/Partner Apps", "com.motorola.brapps"},
+    {"Moto Game Mode", "com.motorola.gamemode"},
+    {"InMobi Weather", "com.inmobi.weather"},
+    {"Moto Hub (Gestures/Display)", "com.motorola.moto"},
+    {NULL, NULL}
+};
+
+static const PackageEntry LENOVO_APPS[] = {
+    {"Lenovo ID", "com.lenovo.lsf.user"},
+    {"Lenovo AnyShare", "com.lenovo.anyshare.gps"},
+    {"Lenovo Launcher", "com.lenovo.launcher"},
+    {"Lenovo Tab/Device Center", "com.lenovo.tab.devicecenter"},
+    {"Lenovo Smart Connect / Project Unity", "com.motorola.cn.projectunity"},
+    {"Lenovo Bug Report", "com.lenovo.leos.appstore.bugreport"},
+    {"Lenovo Feedback", "com.lenovo.feedback"},
+    {"Lenovo Partner/Browser", "com.lenovo.browser.hd"},
+    {NULL, NULL}
 };
 
 static const PackageEntry ZTE_APPS[] = {
     {"ZTE Voice Assistant", "com.zte.assistant"},
     {"ZTE Weather", "com.zte.weather"},
-    {NULL, NULL} 
+    {NULL, NULL}
 };
 
 static const PackageEntry JIO_APPS[] = {
@@ -234,15 +244,11 @@ static const PackageEntry JIO_APPS[] = {
     {"TIF Extn (STB)", "com.jio.stb.tifextn"},
     {"TR069 Client", "insight.tr069.client"},
     {"Managed Provisioning", "com.android.managedprovisioning"},
-    {NULL, NULL} 
+    {NULL, NULL}
 };
-
 
 // --- HELPER FUNCTIONS ---
 
-/**
- * @brief Frees all memory associated with an AppItem.
- */
 static void app_item_free(AppItem *item) {
     if (!item) return;
     g_free(item->package_name);
@@ -250,9 +256,6 @@ static void app_item_free(AppItem *item) {
     g_free(item);
 }
 
-/**
- * @brief Shows/hides the bottom action bar based on current state.
- */
 static void update_action_bar_visibility(AppState *state) {
     gint selected_count = 0;
     GList *l;
@@ -270,7 +273,7 @@ static void update_action_bar_visibility(AppState *state) {
         gtk_label_set_text(GTK_LABEL(state->status_label), label_text);
         g_free(label_text);
         gtk_widget_set_sensitive(state->debloat_button, TRUE);
-    } 
+    }
     else if (state->selected_device_id == NULL) {
         gtk_widget_set_visible(state->action_bar, FALSE);
     }
@@ -283,9 +286,6 @@ static void update_action_bar_visibility(AppState *state) {
 
 // --- CALLBACKS ---
 
-/**
- * @brief Shows a welcome dialog with instructions for enabling USB Debugging.
- */
 static void show_welcome_dialog(GtkWindow *parent) {
     AdwDialog *dialog = adw_alert_dialog_new(
         "Welcome to Android Debloater!",
@@ -301,7 +301,7 @@ static void show_welcome_dialog(GtkWindow *parent) {
     gtk_widget_set_margin_top(box, 12);
     gtk_widget_set_margin_bottom(box, 12);
 
-    const gchar *instructions = 
+    const gchar *instructions =
         "To use this tool, you must enable USB Debugging (ADB) on your device.\n\n"
         "1.  Go to Settings > About Phone.\n"
         "2.  Tap on Build Number 7 times until you see 'You are now a developer!'.\n"
@@ -320,13 +320,10 @@ static void show_welcome_dialog(GtkWindow *parent) {
     adw_alert_dialog_choose(ADW_ALERT_DIALOG(dialog), GTK_WIDGET(parent), NULL, NULL, NULL);
 }
 
-/**
- * @brief Shows the "About" dialog.
- */
 static void on_about_clicked(GtkButton *button, GtkWindow *parent) {
     (void)button;
     AdwDialog *dialog = adw_about_dialog_new();
-    
+
     adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(dialog), "Android Debloater");
     adw_about_dialog_set_version(ADW_ABOUT_DIALOG(dialog), "0.7.2 (Libadwaita)");
     adw_about_dialog_set_developer_name(ADW_ABOUT_DIALOG(dialog), "Kushagra Karira");
@@ -335,21 +332,15 @@ static void on_about_clicked(GtkButton *button, GtkWindow *parent) {
     adw_about_dialog_set_website(ADW_ABOUT_DIALOG(dialog), "https://kushagrakarira.com");
     adw_about_dialog_set_issue_url(ADW_ABOUT_DIALOG(dialog), "https://github.com/KushagraKarira/Debloat/issues");
     adw_about_dialog_add_link(ADW_ABOUT_DIALOG(dialog), "Project Link", "https://github.com/KushagraKarira/Debloat");
-    
+
     adw_dialog_present(dialog, GTK_WIDGET(parent));
 }
 
-/**
- * @brief Called when an app's checkbox is toggled.
- */
 static void on_app_toggled(GtkCheckButton *check_button, AppItem *item) {
     item->is_selected = gtk_check_button_get_active(check_button);
     update_action_bar_visibility(app_state);
 }
 
-/**
- * @brief Select all visible apps in the current list.
- */
 static void on_select_all_clicked(GtkButton *button, AppState *state) {
     (void)button;
     for (GList *l = state->app_list; l != NULL; l = l->next) {
@@ -364,9 +355,6 @@ static void on_select_all_clicked(GtkButton *button, AppState *state) {
     update_action_bar_visibility(state);
 }
 
-/**
- * @brief Deselect all apps in the current list.
- */
 static void on_deselect_all_clicked(GtkButton *button, AppState *state) {
     (void)button;
     for (GList *l = state->app_list; l != NULL; l = l->next) {
@@ -379,9 +367,6 @@ static void on_deselect_all_clicked(GtkButton *button, AppState *state) {
     update_action_bar_visibility(state);
 }
 
-/**
- * @brief Filter the app list in real time as the user types in the search bar.
- */
 static void on_search_changed(GtkSearchEntry *entry, AppState *state) {
     const gchar *search_text = gtk_editable_get_text(GTK_EDITABLE(entry));
     gchar *lower_search = search_text ? g_utf8_strdown(search_text, -1) : g_strdup("");
@@ -407,9 +392,6 @@ static void on_search_changed(GtkSearchEntry *entry, AppState *state) {
     update_action_bar_visibility(state);
 }
 
-/**
- * @brief Called when a manufacturer (device category) is selected from the left list.
- */
 static void on_device_selected(GtkListBox *list_box, GtkListBoxRow *row, AppState *state) {
     (void)list_box;
     if (!row) return;
@@ -421,14 +403,11 @@ static void on_device_selected(GtkListBox *list_box, GtkListBoxRow *row, AppStat
         g_free(state->selected_manufacturer_id);
     }
     state->selected_manufacturer_id = g_strdup(manufacturer_id);
-    
+
     gtk_widget_set_visible(state->action_bar, FALSE);
     update_app_list(state);
 }
 
-/**
- * @brief Auto-detect device manufacturer using ADB getprop and select matching list.
- */
 static void detect_and_select_manufacturer(AppState *state) {
     if (!state->selected_device_id) return;
 
@@ -457,7 +436,8 @@ static void detect_and_select_manufacturer(AppState *state) {
         else if (strstr(mfg, "realme")) matched_id = "RealMe";
         else if (strstr(mfg, "vivo") || strstr(mfg, "iqoo")) matched_id = "Vivo";
         else if (strstr(mfg, "sony")) matched_id = "Sony";
-        else if (strstr(mfg, "motorola") || strstr(mfg, "lenovo")) matched_id = "Motorola";
+        else if (strstr(mfg, "motorola")) matched_id = "Motorola";
+        else if (strstr(mfg, "lenovo")) matched_id = "Lenovo";
         else if (strstr(mfg, "nokia") || strstr(mfg, "hmd")) matched_id = "Nokia";
         else if (strstr(mfg, "tcl") || strstr(mfg, "alcatel")) matched_id = "TCL";
         else if (strstr(mfg, "zte") || strstr(mfg, "nubia")) matched_id = "ZTE";
@@ -482,9 +462,6 @@ static void detect_and_select_manufacturer(AppState *state) {
     g_free(stderr_str);
 }
 
-/**
- * @brief Runs `adb devices` to find connected devices and populates the dropdown.
- */
 static void populate_adb_devices(AppState *state) {
     gchar *stdout_str = NULL;
     gchar *stderr_str = NULL;
@@ -500,7 +477,7 @@ static void populate_adb_devices(AppState *state) {
     if (n_items > 1) {
         gtk_string_list_splice(state->device_model, 1, n_items - 1, NULL);
     }
-    
+
     gtk_drop_down_set_selected(GTK_DROP_DOWN(state->device_dropdown), 0);
     if (state->selected_device_id) {
         g_free(state->selected_device_id);
@@ -522,7 +499,7 @@ static void populate_adb_devices(AppState *state) {
 
     if (stdout_str) {
         gchar **lines = g_strsplit(stdout_str, "\n", -1);
-        
+
         for (int i = 0; lines[i] != NULL; i++) {
             if (i == 0) continue;
 
@@ -542,7 +519,7 @@ static void populate_adb_devices(AppState *state) {
         }
         g_strfreev(lines);
     }
-    
+
     gchar *status_msg;
     if (devices_found > 0) {
         status_msg = g_strdup_printf("Found %d authorized device(s). Select one to begin.", devices_found);
@@ -556,13 +533,10 @@ static void populate_adb_devices(AppState *state) {
 
     g_free(stdout_str);
     g_free(stderr_str);
-    
+
     update_action_bar_visibility(state);
 }
 
-/**
- * @brief Called when a device is selected from the dropdown.
- */
 static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, AppState *state) {
     (void)pspec;
     guint pos = gtk_drop_down_get_selected(dropdown);
@@ -577,8 +551,10 @@ static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, App
         state->selected_device_id = g_strdup(device_id);
         gtk_label_set_text(GTK_LABEL(state->device_status_label), "");
         detect_and_select_manufacturer(state);
+    } else {
+        gtk_label_set_text(GTK_LABEL(state->device_status_label), "No device selected.");
     }
-    
+
     update_action_bar_visibility(state);
 }
 
@@ -587,9 +563,6 @@ static void on_refresh_devices_clicked(GtkButton *button, AppState *state) {
     populate_adb_devices(state);
 }
 
-/**
- * @brief Called when an "Undo" (reinstall) button is clicked.
- */
 static void on_reinstall_clicked(GtkButton *button, AppItem *item) {
     if (!app_state || !app_state->selected_device_id) {
         return;
@@ -605,9 +578,9 @@ static void on_reinstall_clicked(GtkButton *button, AppItem *item) {
     gchar *cmd_args[] = {
         "adb",
         "-s", app_state->selected_device_id,
-        "shell", 
-        "cmd", 
-        "package", 
+        "shell",
+        "cmd",
+        "package",
         "install-existing",
         item->package_name,
         NULL
@@ -635,9 +608,6 @@ static void on_reinstall_clicked(GtkButton *button, AppItem *item) {
     g_free(stderr_str);
 }
 
-/**
- * @brief Creates a new UI row in the "Recently Uninstalled" list.
- */
 static void add_row_to_uninstalled_list(AppState *state, AppItem *item) {
     GtkWidget *row = gtk_list_box_row_new();
     GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
@@ -658,7 +628,7 @@ static void add_row_to_uninstalled_list(AppState *state, AppItem *item) {
     gtk_box_append(GTK_BOX(vbox), display_label);
     gtk_box_append(GTK_BOX(vbox), package_label);
     gtk_widget_set_hexpand(vbox, TRUE);
-    
+
     GtkWidget *reinstall_button = gtk_button_new_with_label("Restore");
     gtk_widget_add_css_class(reinstall_button, "suggested-action");
     g_signal_connect(reinstall_button, "clicked", G_CALLBACK(on_reinstall_clicked), item);
@@ -666,14 +636,11 @@ static void add_row_to_uninstalled_list(AppState *state, AppItem *item) {
     gtk_box_append(GTK_BOX(hbox), vbox);
     gtk_box_append(GTK_BOX(hbox), reinstall_button);
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), hbox);
-    
-    item->uninstalled_list_row = row; 
+
+    item->uninstalled_list_row = row;
     gtk_list_box_append(GTK_LIST_BOX(state->uninstalled_list_box), row);
 }
 
-/**
- * @brief Called when the "Remove" button is clicked. Runs ADB uninstall commands.
- */
 static void on_debloat_clicked(GtkButton *button, AppState *state) {
     (void)button;
     gint success_count = 0;
@@ -700,10 +667,10 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
             gchar *cmd_args[] = {
                 "adb",
                 "-s", state->selected_device_id,
-                "shell", 
-                "pm", 
-                "uninstall", 
-                "--user", 
+                "shell",
+                "pm",
+                "uninstall",
+                "--user",
                 "0",
                 item->package_name,
                 NULL
@@ -719,14 +686,14 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
                 failure_count++;
                 error_in_adb_path = TRUE;
             } else if (!spawn_success) {
-                 failure_count++;
+                failure_count++;
             } else {
                 gchar *stripped_output = stdout_str ? g_strstrip(stdout_str) : NULL;
-                
+
                 if (stripped_output && g_str_has_prefix(stripped_output, "Success")) {
                     uninstall_successful = TRUE;
                 }
-                
+
                 if (uninstall_successful) {
                     success_count++;
                     items_to_remove = g_list_append(items_to_remove, item);
@@ -738,7 +705,7 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
 
             g_free(stdout_str);
             g_free(stderr_str);
-            
+
             if (error_in_adb_path) break;
         }
         current_l = next_l;
@@ -767,9 +734,6 @@ static void on_debloat_clicked(GtkButton *button, AppState *state) {
     update_action_bar_visibility(state);
 }
 
-/**
- * @brief Runs a custom command from the "Debug" page using safe shell argument parsing.
- */
 static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
     (void)button;
     if (!state->selected_device_id) {
@@ -800,7 +764,7 @@ static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
     cmd_args[1] = "-s";
     cmd_args[2] = state->selected_device_id;
     cmd_args[3] = "shell";
-    
+
     for (int i = 0; i < user_cmd_len; i++) {
         cmd_args[4 + i] = user_cmd_parts[i];
     }
@@ -809,7 +773,7 @@ static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
     gtk_text_buffer_set_text(state->debug_output_buffer, "", -1);
     GtkTextIter iter;
     gtk_text_buffer_get_end_iter(state->debug_output_buffer, &iter);
-    
+
     gchar *full_cmd_display = g_strjoinv(" ", cmd_args);
     gtk_text_buffer_insert(state->debug_output_buffer, &iter, "Running command:\n", -1);
     gtk_text_buffer_insert(state->debug_output_buffer, &iter, full_cmd_display, -1);
@@ -843,9 +807,9 @@ static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
             gtk_text_buffer_insert(state->debug_output_buffer, &iter, "\n", -1);
         }
         if ((!stdout_str || *stdout_str == '\0') && (!stderr_str || *stderr_str == '\0')) {
-             gtk_text_buffer_insert(state->debug_output_buffer, &iter, "--- COMMAND RAN WITH NO OUTPUT ---\n", -1);
+            gtk_text_buffer_insert(state->debug_output_buffer, &iter, "--- COMMAND RAN WITH NO OUTPUT ---\n", -1);
         }
-        
+
         if (WIFEXITED(exit_status)) {
             gchar *exit_msg = g_strdup_printf("\n--- Exit Code: %d ---\n", WEXITSTATUS(exit_status));
             gtk_text_buffer_insert(state->debug_output_buffer, &iter, exit_msg, -1);
@@ -863,12 +827,8 @@ static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
     g_free(cmd_args);
 }
 
-
 // --- LIST POPULATION FUNCTIONS ---
 
-/**
- * @brief Populates the left-side manufacturer list with automatic memory cleanup handlers.
- */
 static void update_device_list(AppState *state) {
     GtkListBoxRow *row;
     while ((row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(state->device_list_box), 0))) {
@@ -878,15 +838,15 @@ static void update_device_list(AppState *state) {
     const gchar *mock_devices[] = {
         "Samsung (Galaxy Devices)", "Xiaomi (Mi/Redmi Devices)", "OnePlus (Oxygen OS)",
         "Oppo (ColorOS)", "RealMe (ColorOS/RealMe UI)", "Vivo (Funtouch OS)",
-        "Sony (Xperia Devices)", "Motorola (Moto Devices)", "Nokia (HMD Devices)",
-        "TCL (Alcatel/TCL Devices)", "ZTE (Nubia/Axon Devices)", "Jio (STB/Phone)",
-        NULL
+        "Sony (Xperia Devices)", "Motorola (Moto Devices)", "Lenovo (Tablets/Phones)",
+        "Nokia (HMD Devices)", "TCL (Alcatel/TCL Devices)", "ZTE (Nubia/Axon Devices)",
+        "Jio (STB/Phone)", NULL
     };
 
     const gchar *mock_ids[] = {
         "Samsung", "Xiaomi", "OnePlus", "Oppo", "RealMe", "Vivo",
-        "Sony", "Motorola", "Nokia", "TCL", "ZTE", "Jio",
-        NULL
+        "Sony", "Motorola", "Lenovo", "Nokia", "TCL", "ZTE",
+        "Jio", NULL
     };
 
     GtkListBoxRow *initial_row = NULL;
@@ -902,11 +862,11 @@ static void update_device_list(AppState *state) {
         GtkWidget *icon = gtk_image_new_from_icon_name("phone-symbolic");
         gtk_image_set_pixel_size(GTK_IMAGE(icon), 20);
         gtk_box_append(GTK_BOX(hbox), icon);
-        
+
         GtkWidget *label = gtk_label_new(mock_devices[i]);
         gtk_label_set_xalign(GTK_LABEL(label), 0.0);
         gtk_box_append(GTK_BOX(hbox), label);
-        
+
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row_widget), hbox);
 
         g_object_set_data_full(G_OBJECT(row_widget), "device-id", g_strdup(mock_ids[i]), g_free);
@@ -924,15 +884,12 @@ static void update_device_list(AppState *state) {
     }
 }
 
-/**
- * @brief Populates the right-side app list based on the selected manufacturer.
- */
 static void update_app_list(AppState *state) {
     GtkListBoxRow *row;
     while ((row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(state->app_list_box), 0))) {
         gtk_list_box_remove(GTK_LIST_BOX(state->app_list_box), GTK_WIDGET(row));
     }
-    
+
     g_list_free_full(state->app_list, (GDestroyNotify)app_item_free);
     state->app_list = NULL;
 
@@ -950,10 +907,11 @@ static void update_app_list(AppState *state) {
         else if (g_strcmp0(category_id, "OnePlus") == 0) packages_to_load = ONEPLUS_APPS;
         else if (g_strcmp0(category_id, "Nokia") == 0) packages_to_load = NOKIA_APPS;
         else if (g_strcmp0(category_id, "Motorola") == 0) packages_to_load = MOTOROLA_APPS;
+        else if (g_strcmp0(category_id, "Lenovo") == 0) packages_to_load = LENOVO_APPS;
         else if (g_strcmp0(category_id, "ZTE") == 0) packages_to_load = ZTE_APPS;
         else if (g_strcmp0(category_id, "Jio") == 0) packages_to_load = JIO_APPS;
     }
-    
+
     if (!packages_to_load) {
         gtk_label_set_text(GTK_LABEL(state->status_label), "Select a device category to view available bloatware.");
         return;
@@ -966,7 +924,7 @@ static void update_app_list(AppState *state) {
         item->is_selected = FALSE;
 
         GtkWidget *row_widget = gtk_list_box_row_new();
-        GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12); 
+        GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
         gtk_widget_set_margin_start(hbox, 12);
         gtk_widget_set_margin_end(hbox, 12);
         gtk_widget_set_margin_top(hbox, 6);
@@ -976,10 +934,10 @@ static void update_app_list(AppState *state) {
         item->check_button = check;
         gtk_box_append(GTK_BOX(hbox), check);
 
-        GtkWidget *icon = gtk_image_new_from_icon_name("package-x-generic-symbolic"); 
-        gtk_image_set_pixel_size(GTK_IMAGE(icon), 18); 
+        GtkWidget *icon = gtk_image_new_from_icon_name("package-x-generic-symbolic");
+        gtk_image_set_pixel_size(GTK_IMAGE(icon), 18);
         gtk_box_append(GTK_BOX(hbox), icon);
-        
+
         GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
         GtkWidget *display_label = gtk_label_new(item->display_name);
         GtkWidget *package_label = gtk_label_new(item->package_name);
@@ -987,7 +945,7 @@ static void update_app_list(AppState *state) {
         gtk_label_set_xalign(GTK_LABEL(display_label), 0.0);
         gtk_label_set_xalign(GTK_LABEL(package_label), 0.0);
         gtk_widget_add_css_class(package_label, "caption");
-        gtk_widget_set_opacity(package_label, 0.7); 
+        gtk_widget_set_opacity(package_label, 0.7);
 
         gtk_box_append(GTK_BOX(vbox), display_label);
         gtk_box_append(GTK_BOX(vbox), package_label);
@@ -1009,19 +967,14 @@ static void update_app_list(AppState *state) {
     update_action_bar_visibility(state);
 }
 
-
 // --- UI SETUP ---
 
-/**
- * @brief Creates all UI widgets and connects signals.
- */
 static void activate(GtkApplication *app, AppState *state) {
     state->selected_device_id = NULL;
     state->selected_manufacturer_id = g_strdup("Samsung");
     state->app_list = NULL;
-    state->uninstalled_app_list = NULL; 
+    state->uninstalled_app_list = NULL;
 
-    // --- Window ---
     state->window = ADW_APPLICATION_WINDOW(adw_application_window_new(GTK_APPLICATION(app)));
     gtk_window_set_title(GTK_WINDOW(state->window), "Android Debloater");
     gtk_window_set_default_size(GTK_WINDOW(state->window), 960, 640);
@@ -1029,7 +982,6 @@ static void activate(GtkApplication *app, AppState *state) {
     GtkWidget *main_content_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     adw_application_window_set_content(state->window, main_content_box);
 
-    // --- Header Bar ---
     GtkWidget *header_bar = adw_header_bar_new();
     gtk_box_append(GTK_BOX(main_content_box), header_bar);
 
@@ -1041,24 +993,21 @@ static void activate(GtkApplication *app, AppState *state) {
     adw_header_bar_pack_end(ADW_HEADER_BAR(header_bar), about_button);
     g_signal_connect(about_button, "clicked", G_CALLBACK(on_about_clicked), GTK_WINDOW(state->window));
 
-    // --- Main Stack (Pages) ---
     GtkWidget *stack = gtk_stack_new();
     gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(stack_switcher), GTK_STACK(stack));
     gtk_box_append(GTK_BOX(main_content_box), stack);
-
 
     // --- PAGE 1: DEBLOAT ---
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_stack_add_titled(GTK_STACK(stack), paned, "debloat", "Debloat");
 
-    // --- Left Pane (Device Selection) ---
     GtkWidget *left_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_set_margin_start(left_box, 12);
     gtk_widget_set_margin_end(left_box, 12);
     gtk_widget_set_margin_top(left_box, 12);
     gtk_widget_set_margin_bottom(left_box, 12);
     gtk_paned_set_start_child(GTK_PANED(paned), left_box);
-    gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE); 
+    gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE);
     gtk_paned_set_shrink_start_child(GTK_PANED(paned), FALSE);
 
     GtkWidget *adb_header = gtk_label_new("Connected Device");
@@ -1105,7 +1054,6 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_widget_set_vexpand(device_scrolled, TRUE);
     gtk_box_append(GTK_BOX(left_box), device_scrolled);
 
-    // --- Right Pane (App List, Search & Action Bar) ---
     GtkWidget *right_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_paned_set_end_child(GTK_PANED(paned), right_container);
 
@@ -1132,7 +1080,7 @@ static void activate(GtkApplication *app, AppState *state) {
     GtkWidget *deselect_all_btn = gtk_button_new_with_label("Clear");
     g_signal_connect(deselect_all_btn, "clicked", G_CALLBACK(on_deselect_all_clicked), state);
     gtk_box_append(GTK_BOX(controls_hbox), deselect_all_btn);
-    
+
     state->app_list_box = gtk_list_box_new();
     gtk_widget_add_css_class(state->app_list_box, "boxed-list");
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->app_list_box), GTK_SELECTION_NONE);
@@ -1142,7 +1090,6 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_widget_set_vexpand(app_scrolled, TRUE);
     gtk_box_append(GTK_BOX(right_vbox), app_scrolled);
 
-    // Bottom Action Bar
     state->action_bar = gtk_action_bar_new();
     gtk_widget_set_visible(state->action_bar, FALSE);
     gtk_box_append(GTK_BOX(right_container), state->action_bar);
@@ -1155,9 +1102,8 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_widget_add_css_class(state->debloat_button, "destructive-action");
     gtk_action_bar_pack_end(GTK_ACTION_BAR(state->action_bar), state->debloat_button);
     g_signal_connect(state->debloat_button, "clicked", G_CALLBACK(on_debloat_clicked), state);
-    
-    gtk_paned_set_position(GTK_PANED(paned), 300); 
 
+    gtk_paned_set_position(GTK_PANED(paned), 300);
 
     // --- PAGE 2: UNDO ---
     GtkWidget *undo_page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
@@ -1181,7 +1127,6 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_widget_set_vexpand(uninstalled_scrolled, TRUE);
     gtk_box_append(GTK_BOX(undo_page_box), uninstalled_scrolled);
 
-
     // --- PAGE 3: DEBUG ---
     GtkWidget *debug_page_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_set_margin_start(debug_page_box, 16);
@@ -1204,7 +1149,7 @@ static void activate(GtkApplication *app, AppState *state) {
 
     GtkWidget *debug_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append(GTK_BOX(debug_page_box), debug_hbox);
-    
+
     state->debug_command_entry = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(state->debug_command_entry), "pm list packages -f");
     gtk_widget_set_hexpand(state->debug_command_entry, TRUE);
@@ -1234,8 +1179,7 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(debug_output_view), GTK_WRAP_WORD_CHAR);
     state->debug_output_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(debug_output_view));
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(debug_scrolled), debug_output_view);
-    
-    // --- FINAL SETUP ---
+
     update_device_list(state);
     populate_adb_devices(state);
 
@@ -1243,9 +1187,6 @@ static void activate(GtkApplication *app, AppState *state) {
     show_welcome_dialog(GTK_WINDOW(state->window));
 }
 
-/**
- * @brief Frees all global state resources on application shutdown.
- */
 static void on_shutdown(GtkApplication *app, gpointer user_data) {
     (void)app;
     (void)user_data;
@@ -1270,15 +1211,13 @@ static void on_shutdown(GtkApplication *app, gpointer user_data) {
     app_state = NULL;
 }
 
-// --- MAIN FUNCTION ---
-
 int main(int argc, char **argv) {
     AdwApplication *app;
     int status;
 
     app_state = g_new0(AppState, 1);
     app = adw_application_new("com.gemini.debloater", G_APPLICATION_DEFAULT_FLAGS);
-    
+
     g_signal_connect(app, "activate", G_CALLBACK(activate), app_state);
     g_signal_connect(app, "shutdown", G_CALLBACK(on_shutdown), NULL);
 
@@ -1287,5 +1226,3 @@ int main(int argc, char **argv) {
 
     return status;
 }
-
-
