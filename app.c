@@ -554,6 +554,12 @@ static void on_manufacturer_detected_done(GObject *source, GAsyncResult *res, gp
         else if (strstr(mfg, "nokia") || strstr(mfg, "hmd")) matched_id = "Nokia";
         else if (strstr(mfg, "tcl") || strstr(mfg, "alcatel")) matched_id = "TCL";
         else if (strstr(mfg, "zte") || strstr(mfg, "nubia")) matched_id = "ZTE";
+        else if (strstr(mfg, "google")) matched_id = "Google";
+        else if (strstr(mfg, "honor")) matched_id = "Honor";
+        else if (strstr(mfg, "huawei")) matched_id = "Huawei";
+        else if (strstr(mfg, "nothing")) matched_id = "Nothing";
+        else if (strstr(mfg, "tecno") || strstr(mfg, "infinix") || strstr(mfg, "itel") || strstr(mfg, "transsion")) matched_id = "Transsion";
+        else if (strstr(mfg, "asus")) matched_id = "Asus";
 
         if (matched_id) {
             GtkListBoxRow *row = NULL;
@@ -1200,17 +1206,20 @@ static void update_device_list(AppState *state) {
     }
 
     const gchar *mock_devices[] = {
-        "Samsung (Galaxy Devices)", "Xiaomi (Mi/Redmi Devices)", "OnePlus (Oxygen OS)",
-        "Oppo (ColorOS)", "RealMe (ColorOS/RealMe UI)", "Vivo (Funtouch OS)",
+        "Samsung (Galaxy Devices)", "Xiaomi (Mi/Redmi/POCO)", "OnePlus (Oxygen OS)",
+        "Oppo (ColorOS)", "RealMe (ColorOS/RealMe UI)", "Vivo (Funtouch/iQOO)",
+        "Google (Pixel/AOSP)", "Huawei (EMUI Devices)", "Honor (MagicOS)",
+        "Nothing (Nothing OS)", "Transsion (Tecno/Infinix/itel)", "Asus (Zenfone/ROG)",
         "Sony (Xperia Devices)", "Motorola (Moto Devices)", "Lenovo (Tablets/Phones)",
         "Nokia (HMD Devices)", "TCL (Alcatel/TCL Devices)", "ZTE (Nubia/Axon Devices)",
-        "Jio (STB/Phone)", NULL
+        "Jio (STB/Phone)", "Carriers (Bloatware)", "ThirdParty (Meta/MS/Opera)", NULL
     };
 
     const gchar *mock_ids[] = {
         "Samsung", "Xiaomi", "OnePlus", "Oppo", "RealMe", "Vivo",
-        "Sony", "Motorola", "Lenovo", "Nokia", "TCL", "ZTE",
-        "Jio", NULL
+        "Google", "Huawei", "Honor", "Nothing",
+        "Transsion", "Asus", "Sony", "Motorola", "Lenovo",
+        "Nokia", "TCL", "ZTE", "Jio", "Carriers", "ThirdParty", NULL
     };
 
     GtkListBoxRow *initial_row = NULL;
