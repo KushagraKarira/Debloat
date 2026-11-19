@@ -2,20 +2,30 @@
 #include <adwaita.h>
 #include <glib/glist.h>
 #include <gio/gio.h>
-#include <sys/wait.h> // Required for WIFEXITED, WEXITSTATUS, WTERMSIG
+#include <sys/wait.h>
 
 // --- STRUCTS AND DATA MANAGEMENT ---
+
+typedef enum {
+    RISK_SAFE = 0,
+    RISK_CAUTION = 1
+} RiskLevel;
 
 typedef struct {
     const gchar *display_name;
     const gchar *package_name;
+    RiskLevel risk;
 } PackageEntry;
 
 typedef struct {
     gchar *package_name;
     gchar *display_name;
+    RiskLevel risk;
     gboolean is_selected;
+    gboolean is_installed_on_device;
+    gchar *action_taken; // "uninstalled" or "disabled" when in Undo list
     GtkWidget *check_button;
+    GtkWidget *install_badge;
     GtkWidget *main_list_row;
     GtkWidget *uninstalled_list_row;
 } AppItem;
@@ -28,6 +38,7 @@ typedef struct {
     GtkWidget *debloat_button;
     GtkWidget *status_label;
     GtkWidget *search_entry;
+    GtkWidget *installed_only_toggle;
 
     // ADB Device selection
     GtkWidget *device_dropdown;
@@ -38,6 +49,7 @@ typedef struct {
     gchar *selected_device_id;
     gchar *selected_manufacturer_id;
     GList *app_list;
+    GHashTable *installed_packages_set; // gchar* package_name -> GINT_TO_POINTER(1)
 
     // "Undo" page state
     GList *uninstalled_app_list;
@@ -45,7 +57,16 @@ typedef struct {
 
     // "Debug" page widgets
     GtkWidget *debug_command_entry;
+    GtkWidget *debug_run_button;
     GtkTextBuffer *debug_output_buffer;
+
+    // Async batch debloat state
+    gboolean is_debloating;
+    GList *pending_debloat_queue;
+    gint debloat_total;
+    gint debloat_done;
+    gint debloat_success;
+    gint debloat_failed;
 } AppState;
 
 static AppState *app_state = NULL;
@@ -53,7 +74,7 @@ static AppState *app_state = NULL;
 // --- FUNCTION PROTOTYPES ---
 static void update_app_list(AppState *state);
 static void update_action_bar_visibility(AppState *state);
-static void populate_adb_devices(AppState *state);
+static void populate_adb_devices_async(AppState *state);
 static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, AppState *state);
 static void on_reinstall_clicked(GtkButton *button, AppItem *item);
 static void add_row_to_uninstalled_list(AppState *state, AppItem *item);
@@ -61,190 +82,196 @@ static void on_about_clicked(GtkButton *button, GtkWindow *parent);
 static void show_welcome_dialog(GtkWindow *parent);
 static void on_run_debug_command_clicked(GtkButton *button, AppState *state);
 static void on_refresh_devices_clicked(GtkButton *button, AppState *state);
-static void detect_and_select_manufacturer(AppState *state);
+static void detect_and_select_manufacturer_async(AppState *state);
+static void query_installed_packages_async(AppState *state);
+static void save_undo_state_for_device(AppState *state);
+static void load_undo_state_for_device(AppState *state);
+static void refresh_app_install_badges(AppState *state);
+static void on_search_changed(GtkSearchEntry *entry, AppState *state);
+static void start_next_debloat_item(AppState *state);
 
 // --- PACKAGE DATA (Bloatware lists) ---
 
 static const PackageEntry SAMSUNG_APPS[] = {
-    {"Samsung Message", "com.samsung.android.messaging"},
-    {"Windows Link", "com.microsoft.appmanager"},
-    {"Samsung E-Commerce", "com.samsung.ecomm.global.in"},
-    {"My Galaxy", "com.mygalaxy"},
-    {"Smart Switch", "com.sec.android.easyMover"},
-    {"OneDrive", "com.microsoft.skydrive"},
-    {"Opera Max VPN", "com.opera.max.oem"},
-    {"Samsung Apps Store", "com.sec.android.app.samsungapps"},
-    {"Bixby Agent", "com.samsung.android.bixby.agent"},
-    {"Facebook App Installer", "com.facebook.system"},
-    {"Facebook App Manager", "com.facebook.appmanager"},
-    {"Game Home", "com.samsung.android.game.gamehome"},
-    {"S Voice", "com.samsung.android.svoice"},
-    {"AppCloud GL", "com.aura.oobe.samsung.gl"},
-    {"AppCloud", "com.aura.oobe.samsung"},
-    {NULL, NULL}
+    {"Samsung Message", "com.samsung.android.messaging", RISK_SAFE},
+    {"Windows Link", "com.microsoft.appmanager", RISK_SAFE},
+    {"Samsung E-Commerce", "com.samsung.ecomm.global.in", RISK_SAFE},
+    {"My Galaxy", "com.mygalaxy", RISK_SAFE},
+    {"Smart Switch", "com.sec.android.easyMover", RISK_SAFE},
+    {"OneDrive", "com.microsoft.skydrive", RISK_SAFE},
+    {"Opera Max VPN", "com.opera.max.oem", RISK_SAFE},
+    {"Samsung Apps Store", "com.sec.android.app.samsungapps", RISK_SAFE},
+    {"Bixby Agent", "com.samsung.android.bixby.agent", RISK_SAFE},
+    {"Facebook App Installer", "com.facebook.system", RISK_SAFE},
+    {"Facebook App Manager", "com.facebook.appmanager", RISK_SAFE},
+    {"Game Home", "com.samsung.android.game.gamehome", RISK_SAFE},
+    {"S Voice", "com.samsung.android.svoice", RISK_SAFE},
+    {"AppCloud GL", "com.aura.oobe.samsung.gl", RISK_SAFE},
+    {"AppCloud", "com.aura.oobe.samsung", RISK_SAFE},
+    {NULL, NULL, RISK_SAFE}
 };
 
 static const PackageEntry XIAOMI_APPS[] = {
-    {"Mi Browser", "com.android.browser"},
-    {"Mi Global Browser", "com.mi.globalbrowser"},
-    {"Mi Wallet India", "com.mipay.wallet.in"},
-    {"Mi Analytics", "com.miui.analytics"},
-    {"Main System Advertising (MSA)", "com.miui.msa.global"},
-    {"Mi Video", "com.miui.video"},
-    {"Xiaomi Shop", "com.xiaomi.shop"},
-    {"Xiaomi O2O", "com.xiaomi.o2o"},
-    {"Xiaomi Pass", "com.xiaomi.pass"},
-    {NULL, NULL}
+    {"Mi Browser", "com.android.browser", RISK_SAFE},
+    {"Mi Global Browser", "com.mi.globalbrowser", RISK_SAFE},
+    {"Mi Wallet India", "com.mipay.wallet.in", RISK_SAFE},
+    {"Mi Analytics", "com.miui.analytics", RISK_SAFE},
+    {"Main System Advertising (MSA)", "com.miui.msa.global", RISK_SAFE},
+    {"Mi Video", "com.miui.video", RISK_SAFE},
+    {"Xiaomi Shop", "com.xiaomi.shop", RISK_SAFE},
+    {"Xiaomi O2O", "com.xiaomi.o2o", RISK_SAFE},
+    {"Xiaomi Pass", "com.xiaomi.pass", RISK_SAFE},
+    {NULL, NULL, RISK_SAFE}
 };
 
 static const PackageEntry VIVO_APPS[] = {
-    {"Vivo Browser", "com.vivo.browser"},
-    {"Vivo App Store", "com.vivo.appstore"},
-    {"BBK Cloud", "com.bbk.cloud"},
-    {"Vivo Gallery", "com.vivo.gallery"},
-    {"Vivo Weather", "com.vivo.weather"},
-    {"Facebook System", "com.facebook.system"},
-    {"Vivo Easy Share", "com.vivo.easyshare"},
-    {"Vivo Hiboard", "com.vivo.hiboard"},
-    {"MTK Logger", "com.mediatek.mtklogger"},
-    {"Vivo Assistant", "com.vivo.assistant"},
-    {NULL, NULL}
+    {"Vivo Browser", "com.vivo.browser", RISK_SAFE},
+    {"Vivo App Store", "com.vivo.appstore", RISK_SAFE},
+    {"BBK Cloud", "com.bbk.cloud", RISK_SAFE},
+    {"Vivo Gallery", "com.vivo.gallery", RISK_SAFE},
+    {"Vivo Weather", "com.vivo.weather", RISK_SAFE},
+    {"Facebook System", "com.facebook.system", RISK_SAFE},
+    {"Vivo Easy Share", "com.vivo.easyshare", RISK_SAFE},
+    {"Vivo Hiboard", "com.vivo.hiboard", RISK_SAFE},
+    {"MTK Logger", "com.mediatek.mtklogger", RISK_SAFE},
+    {"Vivo Assistant", "com.vivo.assistant", RISK_SAFE},
+    {NULL, NULL, RISK_SAFE}
 };
 
 static const PackageEntry TCL_APPS[] = {
-    {"TCL Compass", "com.tcl.compass"},
-    {"Demo Page", "com.tcl.demopage"},
-    {"FM Radio", "com.tcl.fmradio"},
-    {"Face Unlock", "com.tct.faceunlock"},
-    {"Game Mode", "com.tct.gamemode"},
-    {"TCL Music", "com.tct.music"},
-    {"Privacy Mode", "com.tct.privacymode"},
-    {"Retail Demo", "com.tct.retaildemo"},
-    {"Smart Cloud", "com.tct.smart.cloud"},
-    {"Smart Drive Mode", "com.tct.smart.drivemode"},
-    {NULL, NULL}
+    {"TCL Compass", "com.tcl.compass", RISK_SAFE},
+    {"Demo Page", "com.tcl.demopage", RISK_SAFE},
+    {"FM Radio", "com.tcl.fmradio", RISK_SAFE},
+    {"Face Unlock", "com.tct.faceunlock", RISK_SAFE},
+    {"Game Mode", "com.tct.gamemode", RISK_SAFE},
+    {"TCL Music", "com.tct.music", RISK_SAFE},
+    {"Privacy Mode", "com.tct.privacymode", RISK_SAFE},
+    {"Retail Demo", "com.tct.retaildemo", RISK_SAFE},
+    {"Smart Cloud", "com.tct.smart.cloud", RISK_SAFE},
+    {"Smart Drive Mode", "com.tct.smart.drivemode", RISK_SAFE},
+    {NULL, NULL, RISK_SAFE}
 };
 
 static const PackageEntry SONY_APPS[] = {
-    {"TV SideView Video", "com.sony.tvsideview.videoph"},
-    {"Creative effect", "com.sonyericsson.android.addoncamera.artfilter"},
-    {"Usage Stats", "com.sonyericsson.idd.agent"},
-    {"Backup/Restore", "com.sonyericsson.mtp.extension.backuprestore"},
-    {"Sony Music", "com.sonyericsson.music"},
-    {"Sony Themes", "com.sonymobile.themes.xperialoops2"},
-    {"Xperia Lounge", "com.sonymobile.xperialounge.services"},
-    {"Xperia Wallpaper", "com.sonymobile.xperiaxlivewallpaper"},
-    {"Xperia Transfer", "com.sonymobile.xperiatransfermobile"},
-    {"Sony Weather", "com.sonymobile.xperiaweather"},
-    {NULL, NULL}
+    {"TV SideView Video", "com.sony.tvsideview.videoph", RISK_SAFE},
+    {"Creative effect", "com.sonyericsson.android.addoncamera.artfilter", RISK_SAFE},
+    {"Usage Stats", "com.sonyericsson.idd.agent", RISK_SAFE},
+    {"Backup/Restore", "com.sonyericsson.mtp.extension.backuprestore", RISK_SAFE},
+    {"Sony Music", "com.sonyericsson.music", RISK_SAFE},
+    {"Sony Themes", "com.sonymobile.themes.xperialoops2", RISK_SAFE},
+    {"Xperia Lounge", "com.sonymobile.xperialounge.services", RISK_SAFE},
+    {"Xperia Wallpaper", "com.sonymobile.xperiaxlivewallpaper", RISK_SAFE},
+    {"Xperia Transfer", "com.sonymobile.xperiatransfermobile", RISK_SAFE},
+    {"Sony Weather", "com.sonymobile.xperiaweather", RISK_SAFE},
+    {NULL, NULL, RISK_SAFE}
 };
 
 static const PackageEntry REALME_APPS[] = {
-    {"Android Setup", "com.google.android.setupwizard"},
-    {"DocVault", "com.os.docvault"},
-    {"HeyTap Cloud", "com.heytap.cloud"},
-    {"Music (Oppo)", "com.oppo.music"},
-    {"Video (ColorOS)", "com.coloros.video"},
-    {"Clone Phone", "com.coloros.backuprestore"},
-    {"Feedback Toolkit", "com.oppo.logkit"},
-    {"My Realme (User Center)", "com.heytap.usercenter"},
-    {"Opera News", "com.opera.branding.news"},
-    {"Play Movies & TV", "com.google.android.videos"},
-    {NULL, NULL}
+    {"Android Setup", "com.google.android.setupwizard", RISK_CAUTION},
+    {"DocVault", "com.os.docvault", RISK_SAFE},
+    {"HeyTap Cloud", "com.heytap.cloud", RISK_SAFE},
+    {"Music (Oppo)", "com.oppo.music", RISK_SAFE},
+    {"Video (ColorOS)", "com.coloros.video", RISK_SAFE},
+    {"Clone Phone", "com.coloros.backuprestore", RISK_SAFE},
+    {"Feedback Toolkit", "com.oppo.logkit", RISK_SAFE},
+    {"My Realme (User Center)", "com.heytap.usercenter", RISK_SAFE},
+    {"Opera News", "com.opera.branding.news", RISK_SAFE},
+    {"Play Movies & TV", "com.google.android.videos", RISK_SAFE},
+    {NULL, NULL, RISK_SAFE}
 };
 
 static const PackageEntry OPPO_APPS[] = {
-    {"Compass App", "com.coloros.compass2"},
-    {"Video App", "com.coloros.video"},
-    {"Photos App (Gallery)", "com.coloros.gallery3d"},
-    {"Oppo Cloud", "com.coloros.cloud"},
-    {"Find My Phone", "com.coloros.findmyphone"},
-    {"Game Space", "com.coloros.gamespace"},
-    {"Oppo App Market", "com.oppo.market"},
-    {"Oppo Music", "com.oppo.music"},
-    {"Oppo Wallet", "com.coloros.wallet"},
-    {"Find My Phone Client", "com.realme.findphone.client2"},
-    {NULL, NULL}
+    {"Compass App", "com.coloros.compass2", RISK_SAFE},
+    {"Video App", "com.coloros.video", RISK_SAFE},
+    {"Photos App (Gallery)", "com.coloros.gallery3d", RISK_SAFE},
+    {"Oppo Cloud", "com.coloros.cloud", RISK_SAFE},
+    {"Find My Phone", "com.coloros.findmyphone", RISK_CAUTION},
+    {"Game Space", "com.coloros.gamespace", RISK_SAFE},
+    {"Oppo App Market", "com.oppo.market", RISK_SAFE},
+    {"Oppo Music", "com.oppo.music", RISK_SAFE},
+    {"Oppo Wallet", "com.coloros.wallet", RISK_SAFE},
+    {"Find My Phone Client", "com.realme.findphone.client2", RISK_CAUTION},
+    {NULL, NULL, RISK_SAFE}
 };
 
 static const PackageEntry ONEPLUS_APPS[] = {
-    {"Shot On OnePlus", "cn.oneplus.photos"},
-    {"OnePlus Switch (Backup)", "com.oneplus.backuprestore"},
-    {"Zen Mode", "com.oneplus.brickmode"},
-    {"Game Space", "com.oneplus.gamespace"},
-    {"Health Check", "com.oneplus.healthcheck"},
-    {"Community Forum", "net.oneplus.forums"},
-    {"Cricket Scores", "net.oneplus.opsports"},
-    {"OnePlus Weather", "net.oneplus.weather"},
-    {"OnePlus Widget", "net.oneplus.widget"},
-    {NULL, NULL}
+    {"Shot On OnePlus", "cn.oneplus.photos", RISK_SAFE},
+    {"OnePlus Switch (Backup)", "com.oneplus.backuprestore", RISK_SAFE},
+    {"Zen Mode", "com.oneplus.brickmode", RISK_SAFE},
+    {"Game Space", "com.oneplus.gamespace", RISK_SAFE},
+    {"Health Check", "com.oneplus.healthcheck", RISK_SAFE},
+    {"Community Forum", "net.oneplus.forums", RISK_SAFE},
+    {"Cricket Scores", "net.oneplus.opsports", RISK_SAFE},
+    {"OnePlus Weather", "net.oneplus.weather", RISK_SAFE},
+    {"OnePlus Widget", "net.oneplus.widget", RISK_SAFE},
+    {NULL, NULL, RISK_SAFE}
 };
 
 static const PackageEntry NOKIA_APPS[] = {
-    {"Data Go", "com.hmdglobal.datago"},
-    {"My Phone Support", "com.hmdglobal.support"},
-    {"APR Upload Service", "com.evenwell.AprUploadService"},
-    {"Power Saving", "com.evenwell.PowerSaving"},
-    {"Smart Switch", "com.evenwell.smartswitch"},
-    {"Traffic Monitor", "com.evenwell.trafficmonitor"},
-    {"Weather App", "com.evenwell.Weather"},
-    {"Weather Widget", "com.evenwell.weather.widget"},
-    {NULL, NULL}
+    {"Data Go", "com.hmdglobal.datago", RISK_SAFE},
+    {"My Phone Support", "com.hmdglobal.support", RISK_SAFE},
+    {"APR Upload Service", "com.evenwell.AprUploadService", RISK_SAFE},
+    {"Power Saving", "com.evenwell.PowerSaving", RISK_CAUTION},
+    {"Smart Switch", "com.evenwell.smartswitch", RISK_SAFE},
+    {"Traffic Monitor", "com.evenwell.trafficmonitor", RISK_SAFE},
+    {"Weather App", "com.evenwell.Weather", RISK_SAFE},
+    {"Weather Widget", "com.evenwell.weather.widget", RISK_SAFE},
+    {NULL, NULL, RISK_SAFE}
 };
 
 static const PackageEntry MOTOROLA_APPS[] = {
-    {"Lenovo ID", "com.lenovo.lsf.user"},
-    {"Rescue Security", "com.lmi.motorola.rescuesecurity"},
-    {"FM Radio", "com.motorola.android.fmradio"},
-    {"OMA Provisioning", "com.motorola.android.provisioning"},
-    {"Face Unlock Agent", "com.motorola.faceunlocktrustagent"},
-    {"Invisible Net", "com.motorola.invisiblenet"},
-    {"Motosignature", "com.motorola.motosignature.app"},
-    {"Carrier Provisioning", "com.motorola.omadm.service"},
-    {"System Package", "com.motorola.pgmsystem2"},
-    {"System Server", "com.motorola.systemserver"},
-    {"Moto Care", "com.motorola.motocare"},
-    {"Moto Notification CCC", "com.motorola.ccc.notification"},
-    {"Moto DIMO Telemetry", "com.motorola.dimo"},
-    {"Moto Spaces", "com.motorola.spaces"},
-    {"Moto AI Services", "com.motorola.aiservices"},
-    {"Moto Security Hub", "com.motorola.securityhub"},
-    {"Moto Browser/Partner Apps", "com.motorola.brapps"},
-    {"Moto Game Mode", "com.motorola.gamemode"},
-    {"InMobi Weather", "com.inmobi.weather"},
-    {"Moto Hub (Gestures/Display)", "com.motorola.moto"},
-    {NULL, NULL}
+    {"Lenovo ID", "com.lenovo.lsf.user", RISK_SAFE},
+    {"Rescue Security", "com.lmi.motorola.rescuesecurity", RISK_SAFE},
+    {"FM Radio", "com.motorola.android.fmradio", RISK_SAFE},
+    {"OMA Provisioning", "com.motorola.android.provisioning", RISK_CAUTION},
+    {"Face Unlock Agent", "com.motorola.faceunlocktrustagent", RISK_SAFE},
+    {"Invisible Net", "com.motorola.invisiblenet", RISK_SAFE},
+    {"Motosignature", "com.motorola.motosignature.app", RISK_SAFE},
+    {"Carrier Provisioning", "com.motorola.omadm.service", RISK_CAUTION},
+    {"System Package", "com.motorola.pgmsystem2", RISK_CAUTION},
+    {"System Server", "com.motorola.systemserver", RISK_CAUTION},
+    {"Moto Care", "com.motorola.motocare", RISK_SAFE},
+    {"Moto Notification CCC", "com.motorola.ccc.notification", RISK_SAFE},
+    {"Moto DIMO Telemetry", "com.motorola.dimo", RISK_SAFE},
+    {"Moto Spaces", "com.motorola.spaces", RISK_SAFE},
+    {"Moto AI Services", "com.motorola.aiservices", RISK_SAFE},
+    {"Moto Security Hub", "com.motorola.securityhub", RISK_SAFE},
+    {"Moto Browser/Partner Apps", "com.motorola.brapps", RISK_SAFE},
+    {"Moto Game Mode", "com.motorola.gamemode", RISK_SAFE},
+    {"InMobi Weather", "com.inmobi.weather", RISK_SAFE},
+    {"Moto Hub (Gestures/Display)", "com.motorola.moto", RISK_CAUTION},
+    {NULL, NULL, RISK_SAFE}
 };
 
 static const PackageEntry LENOVO_APPS[] = {
-    {"Lenovo ID", "com.lenovo.lsf.user"},
-    {"Lenovo AnyShare", "com.lenovo.anyshare.gps"},
-    {"Lenovo Launcher", "com.lenovo.launcher"},
-    {"Lenovo Tab/Device Center", "com.lenovo.tab.devicecenter"},
-    {"Lenovo Smart Connect / Project Unity", "com.motorola.cn.projectunity"},
-    {"Lenovo Bug Report", "com.lenovo.leos.appstore.bugreport"},
-    {"Lenovo Feedback", "com.lenovo.feedback"},
-    {"Lenovo Partner/Browser", "com.lenovo.browser.hd"},
-    {NULL, NULL}
+    {"Lenovo ID", "com.lenovo.lsf.user", RISK_SAFE},
+    {"Lenovo AnyShare", "com.lenovo.anyshare.gps", RISK_SAFE},
+    {"Lenovo Launcher", "com.lenovo.launcher", RISK_CAUTION},
+    {"Lenovo Tab/Device Center", "com.lenovo.tab.devicecenter", RISK_SAFE},
+    {"Lenovo Smart Connect / Project Unity", "com.motorola.cn.projectunity", RISK_SAFE},
+    {"Lenovo Bug Report", "com.lenovo.leos.appstore.bugreport", RISK_SAFE},
+    {"Lenovo Feedback", "com.lenovo.feedback", RISK_SAFE},
+    {"Lenovo Partner/Browser", "com.lenovo.browser.hd", RISK_SAFE},
+    {NULL, NULL, RISK_SAFE}
 };
 
 static const PackageEntry ZTE_APPS[] = {
-    {"ZTE Voice Assistant", "com.zte.assistant"},
-    {"ZTE Weather", "com.zte.weather"},
-    {NULL, NULL}
+    {"ZTE Voice Assistant", "com.zte.assistant", RISK_SAFE},
+    {"ZTE Weather", "com.zte.weather", RISK_SAFE},
+    {NULL, NULL, RISK_SAFE}
 };
 
 static const PackageEntry JIO_APPS[] = {
-    {"Remote Control Service", "com.communitake.remotecontrolservice"},
-    {"Factory Monitor (STB)", "com.sdmc.factorymonitor"},
-    {"PVOD Update Service", "com.iwedia.pvodupdateservice"},
-    {"Remote Care RIL (STB)", "com.jio.stbremotecare.ril"},
-    {"STB Ad Service", "com.jio.stbadservice"},
-    {"Log Service (STB)", "com.rjil.jiostblogservice"},
-    {"TIF Extn (STB)", "com.jio.stb.tifextn"},
-    {"TR069 Client", "insight.tr069.client"},
-    {"Managed Provisioning", "com.android.managedprovisioning"},
-    {NULL, NULL}
+    {"Remote Control Service", "com.communitake.remotecontrolservice", RISK_SAFE},
+    {"Factory Monitor (STB)", "com.sdmc.factorymonitor", RISK_CAUTION},
+    {"PVOD Update Service", "com.iwedia.pvodupdateservice", RISK_SAFE},
+    {"Remote Care RIL (STB)", "com.jio.stbremotecare.ril", RISK_CAUTION},
+    {"STB Ad Service", "com.jio.stbadservice", RISK_SAFE},
+    {"Log Service (STB)", "com.rjil.jiostblogservice", RISK_SAFE},
+    {"TIF Extn (STB)", "com.jio.stb.tifextn", RISK_CAUTION},
+    {"TR069 Client", "insight.tr069.client", RISK_CAUTION},
+    {"Managed Provisioning", "com.android.managedprovisioning", RISK_CAUTION},
+    {NULL, NULL, RISK_SAFE}
 };
 
 // --- HELPER FUNCTIONS ---
@@ -253,14 +280,107 @@ static void app_item_free(AppItem *item) {
     if (!item) return;
     g_free(item->package_name);
     g_free(item->display_name);
+    g_free(item->action_taken);
     g_free(item);
 }
 
-static void update_action_bar_visibility(AppState *state) {
-    gint selected_count = 0;
-    GList *l;
+static gchar *get_device_undo_file_path(const gchar *device_id) {
+    if (!device_id || *device_id == '\0') return NULL;
+    gchar *safe_id = g_uri_escape_string(device_id, NULL, TRUE);
+    gchar *dir_path = g_build_filename(g_get_user_data_dir(), "android-debloater", NULL);
+    g_mkdir_with_parents(dir_path, 0700);
+    gchar *filename = g_strdup_printf("undo_%s.ini", safe_id);
+    gchar *full_path = g_build_filename(dir_path, filename, NULL);
+    g_free(safe_id);
+    g_free(dir_path);
+    g_free(filename);
+    return full_path;
+}
 
-    for (l = state->app_list; l != NULL; l = l->next) {
+static void save_undo_state_for_device(AppState *state) {
+    if (!state->selected_device_id) return;
+    gchar *path = get_device_undo_file_path(state->selected_device_id);
+    if (!path) return;
+
+    GKeyFile *kf = g_key_file_new();
+    gint idx = 0;
+    for (GList *l = state->uninstalled_app_list; l != NULL; l = l->next) {
+        AppItem *item = (AppItem *)l->data;
+        gchar *group = g_strdup_printf("item_%d", idx++);
+        g_key_file_set_string(kf, group, "display_name", item->display_name ? item->display_name : "");
+        g_key_file_set_string(kf, group, "package_name", item->package_name ? item->package_name : "");
+        g_key_file_set_string(kf, group, "action_taken", item->action_taken ? item->action_taken : "uninstalled");
+        g_free(group);
+    }
+
+    GError *error = NULL;
+    if (!g_key_file_save_to_file(kf, path, &error)) {
+        g_warning("Failed to save undo state: %s", error->message);
+        g_error_free(error);
+    }
+    g_key_file_free(kf);
+    g_free(path);
+}
+
+static void clear_uninstalled_list_ui_and_data(AppState *state) {
+    GtkListBoxRow *row;
+    while ((row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(state->uninstalled_list_box), 0))) {
+        gtk_list_box_remove(GTK_LIST_BOX(state->uninstalled_list_box), GTK_WIDGET(row));
+    }
+    g_list_free_full(state->uninstalled_app_list, (GDestroyNotify)app_item_free);
+    state->uninstalled_app_list = NULL;
+}
+
+static void load_undo_state_for_device(AppState *state) {
+    clear_uninstalled_list_ui_and_data(state);
+    if (!state->selected_device_id) return;
+
+    gchar *path = get_device_undo_file_path(state->selected_device_id);
+    if (!path || !g_file_test(path, G_FILE_TEST_EXISTS)) {
+        g_free(path);
+        return;
+    }
+
+    GKeyFile *kf = g_key_file_new();
+    GError *error = NULL;
+    if (g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, &error)) {
+        gsize len = 0;
+        gchar **groups = g_key_file_get_groups(kf, &len);
+        for (gsize i = 0; i < len; i++) {
+            gchar *pkg = g_key_file_get_string(kf, groups[i], "package_name", NULL);
+            gchar *disp = g_key_file_get_string(kf, groups[i], "display_name", NULL);
+            gchar *act = g_key_file_get_string(kf, groups[i], "action_taken", NULL);
+            if (pkg && *pkg != '\0') {
+                AppItem *item = g_new0(AppItem, 1);
+                item->package_name = pkg;
+                item->display_name = disp ? disp : g_strdup(pkg);
+                item->action_taken = act ? act : g_strdup("uninstalled");
+                state->uninstalled_app_list = g_list_append(state->uninstalled_app_list, item);
+                add_row_to_uninstalled_list(state, item);
+            } else {
+                g_free(pkg);
+                g_free(disp);
+                g_free(act);
+            }
+        }
+        g_strfreev(groups);
+    } else if (error) {
+        g_error_free(error);
+    }
+
+    g_key_file_free(kf);
+    g_free(path);
+}
+
+static void update_action_bar_visibility(AppState *state) {
+    if (state->is_debloating) {
+        gtk_widget_set_visible(state->action_bar, TRUE);
+        gtk_widget_set_sensitive(state->debloat_button, FALSE);
+        return;
+    }
+
+    gint selected_count = 0;
+    for (GList *l = state->app_list; l != NULL; l = l->next) {
         AppItem *item = (AppItem *)l->data;
         if (item->is_selected) {
             selected_count++;
@@ -269,29 +389,114 @@ static void update_action_bar_visibility(AppState *state) {
 
     if (selected_count > 0 && state->selected_device_id != NULL) {
         gtk_widget_set_visible(state->action_bar, TRUE);
-        gchar *label_text = g_strdup_printf("Ready to debloat %d app(s) on device '%s'.", selected_count, state->selected_device_id);
+        gchar *label_text = g_strdup_printf(
+            "Ready to remove %d app(s) on '%s'.",
+            selected_count,
+            state->selected_device_id
+        );
         gtk_label_set_text(GTK_LABEL(state->status_label), label_text);
         g_free(label_text);
         gtk_widget_set_sensitive(state->debloat_button, TRUE);
-    }
-    else if (state->selected_device_id == NULL) {
+    } else if (state->selected_device_id == NULL) {
         gtk_widget_set_visible(state->action_bar, FALSE);
-    }
-    else {
+    } else {
         gtk_widget_set_visible(state->action_bar, TRUE);
         gtk_label_set_text(GTK_LABEL(state->status_label), "Select apps from the list to remove.");
         gtk_widget_set_sensitive(state->debloat_button, FALSE);
     }
 }
 
+// --- ASYNC ADB RUNNER HELPER ---
+
+typedef struct {
+    GTask *task;
+    GSubprocess *proc;
+} SubprocessRunCtx;
+
+static void on_subprocess_communicated(GObject *source_object, GAsyncResult *res, gpointer user_data) {
+    GSubprocess *proc = G_SUBPROCESS(source_object);
+    SubprocessRunCtx *ctx = (SubprocessRunCtx *)user_data;
+    gchar *stdout_buf = NULL;
+    gchar *stderr_buf = NULL;
+    GError *error = NULL;
+
+    g_subprocess_communicate_utf8_finish(proc, res, &stdout_buf, &stderr_buf, &error);
+    if (error) {
+        g_task_return_error(ctx->task, error);
+    } else {
+        gchar *combined = g_strdup_printf(
+            "%d\n%s\x1e%s",
+            g_subprocess_get_exit_status(proc),
+            stdout_buf ? stdout_buf : "",
+            stderr_buf ? stderr_buf : ""
+        );
+        g_task_return_pointer(ctx->task, combined, g_free);
+    }
+
+    g_free(stdout_buf);
+    g_free(stderr_buf);
+    g_object_unref(ctx->task);
+    g_object_unref(proc);
+    g_free(ctx);
+}
+
+static void run_adb_async(
+    const gchar *const *argv,
+    GAsyncReadyCallback callback,
+    gpointer user_data
+) {
+    GTask *task = g_task_new(NULL, NULL, callback, user_data);
+    GError *error = NULL;
+    GSubprocess *proc = g_subprocess_newv(
+        argv,
+        G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE,
+        &error
+    );
+    if (error) {
+        g_task_return_error(task, error);
+        g_object_unref(task);
+        return;
+    }
+
+    SubprocessRunCtx *ctx = g_new0(SubprocessRunCtx, 1);
+    ctx->task = task;
+    ctx->proc = proc;
+    g_subprocess_communicate_utf8_async(proc, NULL, NULL, on_subprocess_communicated, ctx);
+}
+
+static gboolean parse_adb_result(
+    GObject *source_object,
+    GAsyncResult *res,
+    gint *out_exit_status,
+    gchar **out_stdout,
+    gchar **out_stderr,
+    GError **error
+) {
+    (void)source_object;
+    gchar *packed = g_task_propagate_pointer(G_TASK(res), error);
+    if (!packed) return FALSE;
+
+    gchar *sep = strchr(packed, '\x1e');
+    gchar *nl = strchr(packed, '\n');
+    if (out_exit_status && nl) {
+        *out_exit_status = atoi(packed);
+    }
+    if (sep && nl && sep > nl) {
+        *sep = '\0';
+        if (out_stdout) *out_stdout = g_strdup(nl + 1);
+        if (out_stderr) *out_stderr = g_strdup(sep + 1);
+    } else {
+        if (out_stdout) *out_stdout = g_strdup(packed);
+        if (out_stderr) *out_stderr = g_strdup("");
+    }
+    g_free(packed);
+    return TRUE;
+}
+
 // --- CALLBACKS ---
 
 static void show_welcome_dialog(GtkWindow *parent) {
-    AdwDialog *dialog = adw_alert_dialog_new(
-        "Welcome to Android Debloater!",
-        NULL
-    );
-
+    AdwDialog *dialog = adw_alert_dialog_new("Welcome to Android Debloater!", NULL);
     adw_alert_dialog_add_response(ADW_ALERT_DIALOG(dialog), "ok", "Got it!");
     adw_alert_dialog_set_default_response(ADW_ALERT_DIALOG(dialog), "ok");
 
@@ -303,15 +508,14 @@ static void show_welcome_dialog(GtkWindow *parent) {
 
     const gchar *instructions =
         "To use this tool, you must enable USB Debugging (ADB) on your device.\n\n"
-        "1.  Go to Settings > About Phone.\n"
-        "2.  Tap on Build Number 7 times until you see 'You are now a developer!'.\n"
-        "3.  Go back to Settings > System > Developer options.\n"
-        "4.  Find and turn on USB debugging.\n"
-        "5.  Connect your phone to your computer via USB.\n"
-        "6.  A prompt will appear on your phone: 'Allow USB debugging?'. Check 'Always allow' and tap OK.";
+        "1. Go to Settings > About Phone.\n"
+        "2. Tap on Build Number 7 times until you see 'You are now a developer!'.\n"
+        "3. Go back to Settings > System > Developer options.\n"
+        "4. Find and turn on USB debugging.\n"
+        "5. Connect your phone to your computer via USB.\n"
+        "6. Allow 'USB debugging?' when prompted on your phone.";
 
     GtkWidget *label = gtk_label_new(instructions);
-    gtk_label_set_use_markup(GTK_LABEL(label), TRUE);
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
     gtk_label_set_xalign(GTK_LABEL(label), 0.0);
     gtk_box_append(GTK_BOX(box), label);
@@ -323,16 +527,14 @@ static void show_welcome_dialog(GtkWindow *parent) {
 static void on_about_clicked(GtkButton *button, GtkWindow *parent) {
     (void)button;
     AdwDialog *dialog = adw_about_dialog_new();
-
     adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(dialog), "Android Debloater");
-    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(dialog), "0.7.2 (Libadwaita)");
+    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(dialog), "0.8.0 (Libadwaita)");
     adw_about_dialog_set_developer_name(ADW_ABOUT_DIALOG(dialog), "Kushagra Karira");
     adw_about_dialog_set_copyright(ADW_ABOUT_DIALOG(dialog), "GPL-3.0 2019-2026 Kushagra Karira");
     adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(dialog), "A GTK4/Libadwaita application for debloating Android devices using ADB.");
     adw_about_dialog_set_website(ADW_ABOUT_DIALOG(dialog), "https://kushagrakarira.com");
     adw_about_dialog_set_issue_url(ADW_ABOUT_DIALOG(dialog), "https://github.com/KushagraKarira/Debloat/issues");
     adw_about_dialog_add_link(ADW_ABOUT_DIALOG(dialog), "Project Link", "https://github.com/KushagraKarira/Debloat");
-
     adw_dialog_present(dialog, GTK_WIDGET(parent));
 }
 
@@ -367,25 +569,36 @@ static void on_deselect_all_clicked(GtkButton *button, AppState *state) {
     update_action_bar_visibility(state);
 }
 
+static void on_installed_only_toggled(GtkToggleButton *toggle, AppState *state) {
+    (void)toggle;
+    on_search_changed(GTK_SEARCH_ENTRY(state->search_entry), state);
+}
+
 static void on_search_changed(GtkSearchEntry *entry, AppState *state) {
-    const gchar *search_text = gtk_editable_get_text(GTK_EDITABLE(entry));
+    const gchar *search_text = entry ? gtk_editable_get_text(GTK_EDITABLE(entry)) : "";
     gchar *lower_search = search_text ? g_utf8_strdown(search_text, -1) : g_strdup("");
+    gboolean installed_only = state->installed_only_toggle &&
+                              gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(state->installed_only_toggle)) &&
+                              state->installed_packages_set != NULL;
 
     for (GList *l = state->app_list; l != NULL; l = l->next) {
         AppItem *item = (AppItem *)l->data;
-        if (strlen(lower_search) == 0) {
-            gtk_widget_set_visible(item->main_list_row, TRUE);
-        } else {
+        gboolean visible = TRUE;
+
+        if (installed_only && !item->is_installed_on_device) {
+            visible = FALSE;
+        }
+
+        if (visible && strlen(lower_search) > 0) {
             gchar *lower_display = g_utf8_strdown(item->display_name, -1);
             gchar *lower_pkg = g_utf8_strdown(item->package_name, -1);
-
-            gboolean match = (strstr(lower_display, lower_search) != NULL) ||
-                             (strstr(lower_pkg, lower_search) != NULL);
-            gtk_widget_set_visible(item->main_list_row, match);
-
+            visible = (strstr(lower_display, lower_search) != NULL) ||
+                      (strstr(lower_pkg, lower_search) != NULL);
             g_free(lower_display);
             g_free(lower_pkg);
         }
+
+        gtk_widget_set_visible(item->main_list_row, visible);
     }
 
     g_free(lower_search);
@@ -399,33 +612,24 @@ static void on_device_selected(GtkListBox *list_box, GtkListBoxRow *row, AppStat
     const gchar *manufacturer_id = (const gchar *)g_object_get_data(G_OBJECT(row), "device-id");
     if (!manufacturer_id) return;
 
-    if (state->selected_manufacturer_id) {
-        g_free(state->selected_manufacturer_id);
+    if (g_strcmp0(state->selected_manufacturer_id, manufacturer_id) == 0) {
+        return;
     }
+
+    g_free(state->selected_manufacturer_id);
     state->selected_manufacturer_id = g_strdup(manufacturer_id);
 
     gtk_widget_set_visible(state->action_bar, FALSE);
     update_app_list(state);
 }
 
-static void detect_and_select_manufacturer(AppState *state) {
-    if (!state->selected_device_id) return;
-
+static void on_manufacturer_detected_done(GObject *source, GAsyncResult *res, gpointer user_data) {
+    AppState *state = (AppState *)user_data;
     gchar *stdout_str = NULL;
     gchar *stderr_str = NULL;
-    gint exit_status;
     GError *error = NULL;
 
-    gchar *cmd_args[] = {
-        "adb", "-s", state->selected_device_id, "shell", "getprop", "ro.product.manufacturer", NULL
-    };
-
-    g_spawn_sync(
-        NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
-        NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
-    );
-
-    if (!error && stdout_str) {
+    if (parse_adb_result(source, res, NULL, &stdout_str, &stderr_str, &error) && stdout_str) {
         gchar *mfg = g_strstrip(g_ascii_strdown(stdout_str, -1));
         const gchar *matched_id = NULL;
 
@@ -462,36 +666,96 @@ static void detect_and_select_manufacturer(AppState *state) {
     g_free(stderr_str);
 }
 
-static void populate_adb_devices(AppState *state) {
+static void detect_and_select_manufacturer_async(AppState *state) {
+    if (!state->selected_device_id) return;
+    const gchar *argv[] = {
+        "adb", "-s", state->selected_device_id, "shell", "getprop", "ro.product.manufacturer", NULL
+    };
+    run_adb_async(argv, on_manufacturer_detected_done, state);
+}
+
+static void refresh_app_install_badges(AppState *state) {
+    for (GList *l = state->app_list; l != NULL; l = l->next) {
+        AppItem *item = (AppItem *)l->data;
+        if (state->installed_packages_set) {
+            item->is_installed_on_device = g_hash_table_contains(
+                state->installed_packages_set, item->package_name
+            );
+            if (item->install_badge) {
+                gtk_label_set_text(
+                    GTK_LABEL(item->install_badge),
+                    item->is_installed_on_device ? "Installed" : "Not found"
+                );
+                gtk_widget_set_visible(item->install_badge, TRUE);
+            }
+        } else {
+            item->is_installed_on_device = FALSE;
+            if (item->install_badge) {
+                gtk_widget_set_visible(item->install_badge, FALSE);
+            }
+        }
+    }
+    on_search_changed(GTK_SEARCH_ENTRY(state->search_entry), state);
+}
+
+static void on_installed_packages_queried(GObject *source, GAsyncResult *res, gpointer user_data) {
+    AppState *state = (AppState *)user_data;
     gchar *stdout_str = NULL;
     gchar *stderr_str = NULL;
-    gint exit_status;
     GError *error = NULL;
-    gchar *cmd_args[] = {"adb", "devices", NULL};
+
+    if (parse_adb_result(source, res, NULL, &stdout_str, &stderr_str, &error) && stdout_str) {
+        if (state->installed_packages_set) {
+            g_hash_table_destroy(state->installed_packages_set);
+        }
+        state->installed_packages_set = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+
+        gchar **lines = g_strsplit(stdout_str, "\n", -1);
+        for (int i = 0; lines[i] != NULL; i++) {
+            gchar *line = g_strstrip(lines[i]);
+            if (g_str_has_prefix(line, "package:")) {
+                const gchar *pkg = line + strlen("package:");
+                if (*pkg != '\0') {
+                    g_hash_table_add(state->installed_packages_set, g_strdup(pkg));
+                }
+            }
+        }
+        g_strfreev(lines);
+        refresh_app_install_badges(state);
+    }
+
+    if (error) g_error_free(error);
+    g_free(stdout_str);
+    g_free(stderr_str);
+}
+
+static void query_installed_packages_async(AppState *state) {
+    if (!state->selected_device_id) {
+        if (state->installed_packages_set) {
+            g_hash_table_destroy(state->installed_packages_set);
+            state->installed_packages_set = NULL;
+        }
+        refresh_app_install_badges(state);
+        return;
+    }
+
+    const gchar *argv[] = {
+        "adb", "-s", state->selected_device_id, "shell", "pm", "list", "packages", "--user", "0", NULL
+    };
+    run_adb_async(argv, on_installed_packages_queried, state);
+}
+
+static void on_adb_devices_populated(GObject *source, GAsyncResult *res, gpointer user_data) {
+    AppState *state = (AppState *)user_data;
+    gchar *stdout_str = NULL;
+    gchar *stderr_str = NULL;
+    GError *error = NULL;
     gint devices_found = 0;
     gint unauthorized_found = 0;
 
-    gtk_label_set_text(GTK_LABEL(state->device_status_label), "Refreshing device list...");
-
-    guint n_items = g_list_model_get_n_items(G_LIST_MODEL(state->device_model));
-    if (n_items > 1) {
-        gtk_string_list_splice(state->device_model, 1, n_items - 1, NULL);
-    }
-
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(state->device_dropdown), 0);
-    if (state->selected_device_id) {
-        g_free(state->selected_device_id);
-        state->selected_device_id = NULL;
-    }
-
-    g_spawn_sync(
-        NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
-        NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
-    );
-
-    if (error) {
+    if (!parse_adb_result(source, res, NULL, &stdout_str, &stderr_str, &error)) {
         gtk_label_set_text(GTK_LABEL(state->device_status_label), "Error: 'adb' command not found in PATH.");
-        g_error_free(error);
+        if (error) g_error_free(error);
         g_free(stdout_str);
         g_free(stderr_str);
         return;
@@ -499,10 +763,7 @@ static void populate_adb_devices(AppState *state) {
 
     if (stdout_str) {
         gchar **lines = g_strsplit(stdout_str, "\n", -1);
-
-        for (int i = 0; lines[i] != NULL; i++) {
-            if (i == 0) continue;
-
+        for (int i = 1; lines[i] != NULL; i++) {
             gchar **parts = g_strsplit(lines[i], "\t", 2);
             if (g_strv_length(parts) == 2) {
                 gchar *device_id = g_strstrip(parts[0]);
@@ -524,7 +785,7 @@ static void populate_adb_devices(AppState *state) {
     if (devices_found > 0) {
         status_msg = g_strdup_printf("Found %d authorized device(s). Select one to begin.", devices_found);
     } else if (unauthorized_found > 0) {
-        status_msg = g_strdup_printf("Found %d unauthorized device(s). Please allow USB Debugging prompt on phone.", unauthorized_found);
+        status_msg = g_strdup_printf("Found %d unauthorized device(s). Allow USB Debugging on phone.", unauthorized_found);
     } else {
         status_msg = g_strdup("No devices found. Connect via USB and refresh.");
     }
@@ -533,26 +794,54 @@ static void populate_adb_devices(AppState *state) {
 
     g_free(stdout_str);
     g_free(stderr_str);
-
     update_action_bar_visibility(state);
+}
+
+static void populate_adb_devices_async(AppState *state) {
+    gtk_label_set_text(GTK_LABEL(state->device_status_label), "Refreshing device list...");
+
+    guint n_items = g_list_model_get_n_items(G_LIST_MODEL(state->device_model));
+    if (n_items > 1) {
+        gtk_string_list_splice(state->device_model, 1, n_items - 1, NULL);
+    }
+
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(state->device_dropdown), 0);
+    g_free(state->selected_device_id);
+    state->selected_device_id = NULL;
+
+    if (state->installed_packages_set) {
+        g_hash_table_destroy(state->installed_packages_set);
+        state->installed_packages_set = NULL;
+    }
+    refresh_app_install_badges(state);
+    clear_uninstalled_list_ui_and_data(state);
+
+    const gchar *argv[] = {"adb", "devices", NULL};
+    run_adb_async(argv, on_adb_devices_populated, state);
 }
 
 static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, AppState *state) {
     (void)pspec;
     guint pos = gtk_drop_down_get_selected(dropdown);
 
-    if (state->selected_device_id) {
-        g_free(state->selected_device_id);
-        state->selected_device_id = NULL;
-    }
+    g_free(state->selected_device_id);
+    state->selected_device_id = NULL;
 
     if (pos > 0) {
         const gchar *device_id = gtk_string_list_get_string(state->device_model, pos);
         state->selected_device_id = g_strdup(device_id);
         gtk_label_set_text(GTK_LABEL(state->device_status_label), "");
-        detect_and_select_manufacturer(state);
+        detect_and_select_manufacturer_async(state);
+        query_installed_packages_async(state);
+        load_undo_state_for_device(state);
     } else {
         gtk_label_set_text(GTK_LABEL(state->device_status_label), "No device selected.");
+        if (state->installed_packages_set) {
+            g_hash_table_destroy(state->installed_packages_set);
+            state->installed_packages_set = NULL;
+        }
+        refresh_app_install_badges(state);
+        clear_uninstalled_list_ui_and_data(state);
     }
 
     update_action_bar_visibility(state);
@@ -560,52 +849,67 @@ static void on_adb_device_selected(GtkDropDown *dropdown, GParamSpec *pspec, App
 
 static void on_refresh_devices_clicked(GtkButton *button, AppState *state) {
     (void)button;
-    populate_adb_devices(state);
+    populate_adb_devices_async(state);
+}
+
+typedef struct {
+    GtkButton *button;
+    AppItem *item;
+    AppState *state;
+} ReinstallCtx;
+
+static void on_restore_enable_done(GObject *source, GAsyncResult *res, gpointer user_data) {
+    ReinstallCtx *ctx = (ReinstallCtx *)user_data;
+    gchar *stdout_str = NULL;
+    gchar *stderr_str = NULL;
+    GError *error = NULL;
+    gboolean ok = FALSE;
+
+    if (parse_adb_result(source, res, NULL, &stdout_str, &stderr_str, &error) && stdout_str) {
+        gchar *s = g_strstrip(stdout_str);
+        if (g_str_has_prefix(s, "Package") || g_str_has_prefix(s, "Enabled")) {
+            ok = TRUE;
+        }
+    }
+
+    if (ok) {
+        gtk_list_box_remove(GTK_LIST_BOX(ctx->state->uninstalled_list_box), ctx->item->uninstalled_list_row);
+        ctx->state->uninstalled_app_list = g_list_remove(ctx->state->uninstalled_app_list, ctx->item);
+        save_undo_state_for_device(ctx->state);
+        query_installed_packages_async(ctx->state);
+        app_item_free(ctx->item);
+    } else {
+        gtk_widget_set_sensitive(GTK_WIDGET(ctx->button), TRUE);
+    }
+
+    if (error) g_error_free(error);
+    g_free(stdout_str);
+    g_free(stderr_str);
+    g_free(ctx);
 }
 
 static void on_reinstall_clicked(GtkButton *button, AppItem *item) {
-    if (!app_state || !app_state->selected_device_id) {
-        return;
-    }
-
+    if (!app_state || !app_state->selected_device_id) return;
     gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
 
-    gchar *stdout_str = NULL;
-    gchar *stderr_str = NULL;
-    gint exit_status;
-    GError *error = NULL;
+    ReinstallCtx *ctx = g_new0(ReinstallCtx, 1);
+    ctx->button = button;
+    ctx->item = item;
+    ctx->state = app_state;
 
-    gchar *cmd_args[] = {
-        "adb",
-        "-s", app_state->selected_device_id,
-        "shell",
-        "cmd",
-        "package",
-        "install-existing",
-        item->package_name,
-        NULL
-    };
-
-    g_spawn_sync(
-        NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
-        NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
-    );
-
-    gchar *stripped_output = stdout_str ? g_strstrip(stdout_str) : NULL;
-
-    if (error) {
-        g_error_free(error);
-        gtk_widget_set_sensitive(GTK_WIDGET(button), TRUE);
-    } else if (stripped_output && g_str_has_prefix(stripped_output, "Package")) {
-        gtk_list_box_remove(GTK_LIST_BOX(app_state->uninstalled_list_box), item->uninstalled_list_row);
-        app_state->uninstalled_app_list = g_list_remove(app_state->uninstalled_app_list, item);
-        app_item_free(item);
+    if (g_strcmp0(item->action_taken, "disabled") == 0) {
+        const gchar *argv[] = {
+            "adb", "-s", app_state->selected_device_id,
+            "shell", "pm", "enable", "--user", "0", item->package_name, NULL
+        };
+        run_adb_async(argv, on_restore_enable_done, ctx);
     } else {
-        gtk_widget_set_sensitive(GTK_WIDGET(button), TRUE);
+        const gchar *argv[] = {
+            "adb", "-s", app_state->selected_device_id,
+            "shell", "cmd", "package", "install-existing", item->package_name, NULL
+        };
+        run_adb_async(argv, on_restore_enable_done, ctx);
     }
-
-    g_free(stdout_str);
-    g_free(stderr_str);
 }
 
 static void add_row_to_uninstalled_list(AppState *state, AppItem *item) {
@@ -618,12 +922,17 @@ static void add_row_to_uninstalled_list(AppState *state, AppItem *item) {
 
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     GtkWidget *display_label = gtk_label_new(item->display_name);
-    GtkWidget *package_label = gtk_label_new(item->package_name);
+    gchar *sub = g_strdup_printf("%s  •  %s",
+        item->package_name,
+        g_strcmp0(item->action_taken, "disabled") == 0 ? "Disabled" : "Uninstalled"
+    );
+    GtkWidget *package_label = gtk_label_new(sub);
+    g_free(sub);
 
     gtk_label_set_xalign(GTK_LABEL(display_label), 0.0);
     gtk_label_set_xalign(GTK_LABEL(package_label), 0.0);
     gtk_widget_add_css_class(package_label, "caption");
-    gtk_widget_set_opacity(package_label, 0.7);
+    gtk_widget_set_opacity(package_label, 0.75);
 
     gtk_box_append(GTK_BOX(vbox), display_label);
     gtk_box_append(GTK_BOX(vbox), package_label);
@@ -641,160 +950,238 @@ static void add_row_to_uninstalled_list(AppState *state, AppItem *item) {
     gtk_list_box_append(GTK_LIST_BOX(state->uninstalled_list_box), row);
 }
 
-static void on_debloat_clicked(GtkButton *button, AppState *state) {
-    (void)button;
-    gint success_count = 0;
-    gint failure_count = 0;
-    GList *items_to_remove = NULL;
-    gboolean error_in_adb_path = FALSE;
+typedef struct {
+    AppState *state;
+    AppItem *item;
+} DebloatStepCtx;
 
-    gtk_widget_set_sensitive(state->debloat_button, FALSE);
-    gtk_label_set_text(GTK_LABEL(state->status_label), "Executing ADB debloat process...");
+static void finish_debloat_item_success(AppState *state, AppItem *item, const gchar *mode) {
+    state->debloat_success++;
+    state->app_list = g_list_remove(state->app_list, item);
+    gtk_list_box_remove(GTK_LIST_BOX(state->app_list_box), item->main_list_row);
 
-    GList *current_l = state->app_list;
-    while (current_l != NULL) {
-        AppItem *item = (AppItem *)current_l->data;
-        GList *next_l = current_l->next;
+    item->is_selected = FALSE;
+    item->action_taken = g_strdup(mode);
+    state->uninstalled_app_list = g_list_append(state->uninstalled_app_list, item);
+    add_row_to_uninstalled_list(state, item);
+    save_undo_state_for_device(state);
 
-        if (item->is_selected) {
-            gchar *stdout_str = NULL;
-            gchar *stderr_str = NULL;
-            gint exit_status;
-            gboolean spawn_success;
-            GError *error = NULL;
-            gboolean uninstall_successful = FALSE;
-
-            gchar *cmd_args[] = {
-                "adb",
-                "-s", state->selected_device_id,
-                "shell",
-                "pm",
-                "uninstall",
-                "--user",
-                "0",
-                item->package_name,
-                NULL
-            };
-
-            spawn_success = g_spawn_sync(
-                NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
-                NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
-            );
-
-            if (error) {
-                g_error_free(error);
-                failure_count++;
-                error_in_adb_path = TRUE;
-            } else if (!spawn_success) {
-                failure_count++;
-            } else {
-                gchar *stripped_output = stdout_str ? g_strstrip(stdout_str) : NULL;
-
-                if (stripped_output && g_str_has_prefix(stripped_output, "Success")) {
-                    uninstall_successful = TRUE;
-                }
-
-                if (uninstall_successful) {
-                    success_count++;
-                    items_to_remove = g_list_append(items_to_remove, item);
-                    gtk_list_box_remove(GTK_LIST_BOX(state->app_list_box), item->main_list_row);
-                } else {
-                    failure_count++;
-                }
-            }
-
-            g_free(stdout_str);
-            g_free(stderr_str);
-
-            if (error_in_adb_path) break;
-        }
-        current_l = next_l;
+    if (state->installed_packages_set) {
+        g_hash_table_remove(state->installed_packages_set, item->package_name);
     }
-
-    for (GList *remove_l = items_to_remove; remove_l != NULL; remove_l = remove_l->next) {
-        AppItem *item = (AppItem *)remove_l->data;
-        state->app_list = g_list_remove(state->app_list, item);
-        state->uninstalled_app_list = g_list_append(state->uninstalled_app_list, item);
-        add_row_to_uninstalled_list(state, item);
-        item->is_selected = FALSE;
-    }
-    g_list_free(items_to_remove);
-
-    gchar *result_msg;
-    if (error_in_adb_path) {
-        result_msg = g_strdup("FATAL ERROR: Could not execute 'adb'. Check your PATH.");
-    } else {
-        result_msg = g_strdup_printf("Debloat complete: %d succeeded, %d failed.", success_count, failure_count);
-    }
-
-    gtk_label_set_text(GTK_LABEL(state->status_label), result_msg);
-    g_free(result_msg);
-
-    gtk_widget_set_sensitive(state->debloat_button, TRUE);
-    update_action_bar_visibility(state);
 }
 
-static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
+static void on_disable_fallback_done(GObject *source, GAsyncResult *res, gpointer user_data) {
+    DebloatStepCtx *ctx = (DebloatStepCtx *)user_data;
+    AppState *state = ctx->state;
+    AppItem *item = ctx->item;
+    gchar *stdout_str = NULL;
+    gchar *stderr_str = NULL;
+    GError *error = NULL;
+    gboolean disabled_ok = FALSE;
+
+    if (parse_adb_result(source, res, NULL, &stdout_str, &stderr_str, &error) && stdout_str) {
+        gchar *s = g_ascii_strdown(g_strstrip(stdout_str), -1);
+        if (strstr(s, "disabled") != NULL) {
+            disabled_ok = TRUE;
+        }
+        g_free(s);
+    }
+
+    if (disabled_ok) {
+        finish_debloat_item_success(state, item, "disabled");
+    } else {
+        state->debloat_failed++;
+    }
+
+    if (error) g_error_free(error);
+    g_free(stdout_str);
+    g_free(stderr_str);
+    g_free(ctx);
+
+    state->debloat_done++;
+    start_next_debloat_item(state);
+}
+
+static void on_uninstall_step_done(GObject *source, GAsyncResult *res, gpointer user_data) {
+    DebloatStepCtx *ctx = (DebloatStepCtx *)user_data;
+    AppState *state = ctx->state;
+    AppItem *item = ctx->item;
+    gchar *stdout_str = NULL;
+    gchar *stderr_str = NULL;
+    GError *error = NULL;
+    gboolean uninstalled_ok = FALSE;
+
+    if (parse_adb_result(source, res, NULL, &stdout_str, &stderr_str, &error) && stdout_str) {
+        gchar *s = g_strstrip(stdout_str);
+        if (g_str_has_prefix(s, "Success")) {
+            uninstalled_ok = TRUE;
+        }
+    }
+
+    if (error) {
+        g_error_free(error);
+        g_free(stdout_str);
+        g_free(stderr_str);
+        state->debloat_failed++;
+        state->debloat_done++;
+        g_free(ctx);
+        start_next_debloat_item(state);
+        return;
+    }
+
+    g_free(stdout_str);
+    g_free(stderr_str);
+
+    if (uninstalled_ok) {
+        finish_debloat_item_success(state, item, "uninstalled");
+        state->debloat_done++;
+        g_free(ctx);
+        start_next_debloat_item(state);
+    } else {
+        // Fallback to pm disable-user --user 0
+        const gchar *argv[] = {
+            "adb", "-s", state->selected_device_id,
+            "shell", "pm", "disable-user", "--user", "0", item->package_name, NULL
+        };
+        run_adb_async(argv, on_disable_fallback_done, ctx);
+    }
+}
+
+static void start_next_debloat_item(AppState *state) {
+    if (!state->pending_debloat_queue || !state->selected_device_id) {
+        g_list_free(state->pending_debloat_queue);
+        state->pending_debloat_queue = NULL;
+        state->is_debloating = FALSE;
+
+        gchar *done_msg = g_strdup_printf(
+            "Done: %d removed/disabled, %d failed.",
+            state->debloat_success,
+            state->debloat_failed
+        );
+        gtk_label_set_text(GTK_LABEL(state->status_label), done_msg);
+        g_free(done_msg);
+        update_action_bar_visibility(state);
+        return;
+    }
+
+    AppItem *item = (AppItem *)state->pending_debloat_queue->data;
+    GList *next = state->pending_debloat_queue->next;
+    g_list_free_1(state->pending_debloat_queue);
+    state->pending_debloat_queue = next;
+
+    gchar *prog = g_strdup_printf(
+        "Removing %d/%d: %s...",
+        state->debloat_done + 1,
+        state->debloat_total,
+        item->display_name
+    );
+    gtk_label_set_text(GTK_LABEL(state->status_label), prog);
+    g_free(prog);
+
+    DebloatStepCtx *ctx = g_new0(DebloatStepCtx, 1);
+    ctx->state = state;
+    ctx->item = item;
+
+    const gchar *argv[] = {
+        "adb", "-s", state->selected_device_id,
+        "shell", "pm", "uninstall", "--user", "0", item->package_name, NULL
+    };
+    run_adb_async(argv, on_uninstall_step_done, ctx);
+}
+
+static void begin_confirmed_debloat(AppState *state) {
+    if (state->is_debloating || !state->selected_device_id) return;
+
+    GList *queue = NULL;
+    gint caution_count = 0;
+    for (GList *l = state->app_list; l != NULL; l = l->next) {
+        AppItem *item = (AppItem *)l->data;
+        if (item->is_selected) {
+            queue = g_list_append(queue, item);
+            if (item->risk == RISK_CAUTION) caution_count++;
+        }
+    }
+
+    if (!queue) return;
+    (void)caution_count;
+
+    state->is_debloating = TRUE;
+    state->pending_debloat_queue = queue;
+    state->debloat_total = (gint)g_list_length(queue);
+    state->debloat_done = 0;
+    state->debloat_success = 0;
+    state->debloat_failed = 0;
+
+    gtk_widget_set_visible(state->action_bar, TRUE);
+    gtk_widget_set_sensitive(state->debloat_button, FALSE);
+    start_next_debloat_item(state);
+}
+
+static void on_debloat_confirm_response(GObject *source, GAsyncResult *res, gpointer user_data) {
+    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(source);
+    AppState *state = (AppState *)user_data;
+    const gchar *resp = adw_alert_dialog_choose_finish(dialog, res);
+    if (g_strcmp0(resp, "confirm") == 0) {
+        begin_confirmed_debloat(state);
+    }
+}
+
+static void on_debloat_clicked(GtkButton *button, AppState *state) {
     (void)button;
-    if (!state->selected_device_id) {
-        gtk_text_buffer_set_text(state->debug_output_buffer, "Error: Please select a connected device from the 'Debloat' page first.", -1);
-        return;
+    if (state->is_debloating || !state->selected_device_id) return;
+
+    gint count = 0;
+    gint caution_count = 0;
+    for (GList *l = state->app_list; l != NULL; l = l->next) {
+        AppItem *item = (AppItem *)l->data;
+        if (item->is_selected) {
+            count++;
+            if (item->risk == RISK_CAUTION) caution_count++;
+        }
     }
+    if (count == 0) return;
 
-    const gchar *command_str = gtk_editable_get_text(GTK_EDITABLE(state->debug_command_entry));
-    if (!command_str || *command_str == '\0') {
-        gtk_text_buffer_set_text(state->debug_output_buffer, "Error: No command entered.", -1);
-        return;
-    }
+    gchar *body = caution_count > 0
+        ? g_strdup_printf(
+            "Remove %d selected package(s) on '%s' for user 0?\n\n"
+            "Warning: %d package(s) are marked 'Caution' (launcher, provisioning, or hub components). "
+            "Protected packages will fall back to 'pm disable-user --user 0'.",
+            count, state->selected_device_id, caution_count
+          )
+        : g_strdup_printf(
+            "Remove %d selected package(s) on '%s' for user 0?\n\n"
+            "Protected packages will fall back to 'pm disable-user --user 0', and you can restore them from the Undo tab.",
+            count, state->selected_device_id
+          );
 
-    gint user_cmd_len = 0;
-    gchar **user_cmd_parts = NULL;
-    GError *parse_error = NULL;
+    AdwDialog *dialog = adw_alert_dialog_new("Confirm Debloat?", body);
+    g_free(body);
 
-    if (!g_shell_parse_argv(command_str, &user_cmd_len, &user_cmd_parts, &parse_error)) {
-        gchar *err_msg = g_strdup_printf("Error parsing command string: %s", parse_error->message);
-        gtk_text_buffer_set_text(state->debug_output_buffer, err_msg, -1);
-        g_free(err_msg);
-        g_error_free(parse_error);
-        return;
-    }
+    adw_alert_dialog_add_response(ADW_ALERT_DIALOG(dialog), "cancel", "Cancel");
+    adw_alert_dialog_add_response(ADW_ALERT_DIALOG(dialog), "confirm", "Remove");
+    adw_alert_dialog_set_response_appearance(ADW_ALERT_DIALOG(dialog), "confirm", ADW_RESPONSE_DESTRUCTIVE);
+    adw_alert_dialog_set_default_response(ADW_ALERT_DIALOG(dialog), "cancel");
+    adw_alert_dialog_set_close_response(ADW_ALERT_DIALOG(dialog), "cancel");
 
-    gchar **cmd_args = g_new(gchar*, 5 + user_cmd_len);
-    cmd_args[0] = "adb";
-    cmd_args[1] = "-s";
-    cmd_args[2] = state->selected_device_id;
-    cmd_args[3] = "shell";
+    adw_alert_dialog_choose(ADW_ALERT_DIALOG(dialog), GTK_WIDGET(state->window), NULL, on_debloat_confirm_response, state);
+}
 
-    for (int i = 0; i < user_cmd_len; i++) {
-        cmd_args[4 + i] = user_cmd_parts[i];
-    }
-    cmd_args[4 + user_cmd_len] = NULL;
-
-    gtk_text_buffer_set_text(state->debug_output_buffer, "", -1);
-    GtkTextIter iter;
-    gtk_text_buffer_get_end_iter(state->debug_output_buffer, &iter);
-
-    gchar *full_cmd_display = g_strjoinv(" ", cmd_args);
-    gtk_text_buffer_insert(state->debug_output_buffer, &iter, "Running command:\n", -1);
-    gtk_text_buffer_insert(state->debug_output_buffer, &iter, full_cmd_display, -1);
-    gtk_text_buffer_insert(state->debug_output_buffer, &iter, "\n\n", -1);
-    g_free(full_cmd_display);
-
+static void on_debug_command_done(GObject *source, GAsyncResult *res, gpointer user_data) {
+    AppState *state = (AppState *)user_data;
     gchar *stdout_str = NULL;
     gchar *stderr_str = NULL;
     gint exit_status = 0;
     GError *error = NULL;
 
-    g_spawn_sync(
-        NULL, cmd_args, NULL, G_SPAWN_SEARCH_PATH,
-        NULL, NULL, &stdout_str, &stderr_str, &exit_status, &error
-    );
+    GtkTextIter iter;
+    gtk_text_buffer_get_end_iter(state->debug_output_buffer, &iter);
 
-    if (error) {
-        gchar *err_msg = g_strdup_printf("--- EXECUTION FAILED ---\n%s\n", error->message);
+    if (!parse_adb_result(source, res, &exit_status, &stdout_str, &stderr_str, &error)) {
+        gchar *err_msg = g_strdup_printf("--- EXECUTION FAILED ---\n%s\n", error ? error->message : "Unknown error");
         gtk_text_buffer_insert(state->debug_output_buffer, &iter, err_msg, -1);
         g_free(err_msg);
-        g_error_free(error);
+        if (error) g_error_free(error);
     } else {
         if (stdout_str && *stdout_str != '\0') {
             gtk_text_buffer_insert(state->debug_output_buffer, &iter, "--- STDOUT ---\n", -1);
@@ -823,8 +1210,76 @@ static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
 
     g_free(stdout_str);
     g_free(stderr_str);
+    if (state->debug_run_button) {
+        gtk_widget_set_sensitive(state->debug_run_button, TRUE);
+    }
+}
+
+static void on_run_debug_command_clicked(GtkButton *button, AppState *state) {
+    (void)button;
+    if (!state->selected_device_id) {
+        gtk_text_buffer_set_text(state->debug_output_buffer, "Error: Select a connected device on the 'Debloat' tab first.", -1);
+        return;
+    }
+
+    const gchar *command_str = gtk_editable_get_text(GTK_EDITABLE(state->debug_command_entry));
+    if (!command_str || *command_str == '\0') {
+        gtk_text_buffer_set_text(state->debug_output_buffer, "Error: No command entered.", -1);
+        return;
+    }
+
+    gint user_cmd_len = 0;
+    gchar **user_cmd_parts = NULL;
+    GError *parse_error = NULL;
+
+    if (!g_shell_parse_argv(command_str, &user_cmd_len, &user_cmd_parts, &parse_error)) {
+        gchar *err_msg = g_strdup_printf("Error parsing command string: %s", parse_error->message);
+        gtk_text_buffer_set_text(state->debug_output_buffer, err_msg, -1);
+        g_free(err_msg);
+        g_error_free(parse_error);
+        return;
+    }
+
+    gchar **cmd_args = g_new(gchar*, 5 + user_cmd_len);
+    cmd_args[0] = g_strdup("adb");
+    cmd_args[1] = g_strdup("-s");
+    cmd_args[2] = g_strdup(state->selected_device_id);
+    cmd_args[3] = g_strdup("shell");
+    for (int i = 0; i < user_cmd_len; i++) {
+        cmd_args[4 + i] = g_strdup(user_cmd_parts[i]);
+    }
+    cmd_args[4 + user_cmd_len] = NULL;
+
+    gtk_text_buffer_set_text(state->debug_output_buffer, "", -1);
+    GtkTextIter iter;
+    gtk_text_buffer_get_end_iter(state->debug_output_buffer, &iter);
+
+    gchar *full_cmd_display = g_strjoinv(" ", cmd_args);
+    gtk_text_buffer_insert(state->debug_output_buffer, &iter, "Running command:\n", -1);
+    gtk_text_buffer_insert(state->debug_output_buffer, &iter, full_cmd_display, -1);
+    gtk_text_buffer_insert(state->debug_output_buffer, &iter, "\n\n", -1);
+    g_free(full_cmd_display);
+
+    if (state->debug_run_button) {
+        gtk_widget_set_sensitive(state->debug_run_button, FALSE);
+    }
+
+    run_adb_async((const gchar *const *)cmd_args, on_debug_command_done, state);
+
+    g_strfreev(cmd_args);
     g_strfreev(user_cmd_parts);
-    g_free(cmd_args);
+}
+
+static void on_stack_page_changed(GtkStack *stack, GParamSpec *pspec, AppState *state) {
+    (void)pspec;
+    const gchar *visible_name = gtk_stack_get_visible_child_name(stack);
+    gboolean on_debloat = (g_strcmp0(visible_name, "debloat") == 0);
+    if (state->search_entry) {
+        gtk_search_entry_set_key_capture_widget(
+            GTK_SEARCH_ENTRY(state->search_entry),
+            on_debloat ? GTK_WIDGET(state->window) : NULL
+        );
+    }
 }
 
 // --- LIST POPULATION FUNCTIONS ---
@@ -868,9 +1323,7 @@ static void update_device_list(AppState *state) {
         gtk_box_append(GTK_BOX(hbox), label);
 
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row_widget), hbox);
-
         g_object_set_data_full(G_OBJECT(row_widget), "device-id", g_strdup(mock_ids[i]), g_free);
-
         gtk_list_box_append(GTK_LIST_BOX(state->device_list_box), row_widget);
 
         if (g_strcmp0(mock_ids[i], state->selected_manufacturer_id) == 0) {
@@ -880,6 +1333,8 @@ static void update_device_list(AppState *state) {
 
     if (initial_row) {
         gtk_list_box_select_row(GTK_LIST_BOX(state->device_list_box), initial_row);
+        g_free(state->selected_manufacturer_id);
+        state->selected_manufacturer_id = NULL;
         on_device_selected(GTK_LIST_BOX(state->device_list_box), initial_row, state);
     }
 }
@@ -913,7 +1368,7 @@ static void update_app_list(AppState *state) {
     }
 
     if (!packages_to_load) {
-        gtk_label_set_text(GTK_LABEL(state->status_label), "Select a device category to view available bloatware.");
+        gtk_label_set_text(GTK_LABEL(state->device_status_label), "Select a manufacturer to view packages.");
         return;
     }
 
@@ -921,10 +1376,11 @@ static void update_app_list(AppState *state) {
         AppItem *item = g_new0(AppItem, 1);
         item->display_name = g_strdup(packages_to_load[i].display_name);
         item->package_name = g_strdup(packages_to_load[i].package_name);
+        item->risk = packages_to_load[i].risk;
         item->is_selected = FALSE;
 
         GtkWidget *row_widget = gtk_list_box_row_new();
-        GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+        GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
         gtk_widget_set_margin_start(hbox, 12);
         gtk_widget_set_margin_end(hbox, 12);
         gtk_widget_set_margin_top(hbox, 6);
@@ -939,17 +1395,31 @@ static void update_app_list(AppState *state) {
         gtk_box_append(GTK_BOX(hbox), icon);
 
         GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        gtk_widget_set_hexpand(vbox, TRUE);
         GtkWidget *display_label = gtk_label_new(item->display_name);
         GtkWidget *package_label = gtk_label_new(item->package_name);
 
         gtk_label_set_xalign(GTK_LABEL(display_label), 0.0);
         gtk_label_set_xalign(GTK_LABEL(package_label), 0.0);
         gtk_widget_add_css_class(package_label, "caption");
-        gtk_widget_set_opacity(package_label, 0.7);
+        gtk_widget_set_opacity(package_label, 0.75);
 
         gtk_box_append(GTK_BOX(vbox), display_label);
         gtk_box_append(GTK_BOX(vbox), package_label);
         gtk_box_append(GTK_BOX(hbox), vbox);
+
+        GtkWidget *risk_label = gtk_label_new(item->risk == RISK_CAUTION ? "Caution" : "Safe");
+        gtk_widget_add_css_class(risk_label, "caption");
+        if (item->risk == RISK_CAUTION) {
+            gtk_widget_add_css_class(risk_label, "warning");
+        }
+        gtk_box_append(GTK_BOX(hbox), risk_label);
+
+        item->install_badge = gtk_label_new("");
+        gtk_widget_add_css_class(item->install_badge, "caption");
+        gtk_widget_set_opacity(item->install_badge, 0.8);
+        gtk_widget_set_visible(item->install_badge, FALSE);
+        gtk_box_append(GTK_BOX(hbox), item->install_badge);
 
         gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row_widget), hbox);
         gtk_list_box_append(GTK_LIST_BOX(state->app_list_box), row_widget);
@@ -960,10 +1430,7 @@ static void update_app_list(AppState *state) {
         state->app_list = g_list_append(state->app_list, item);
     }
 
-    if (state->search_entry) {
-        on_search_changed(GTK_SEARCH_ENTRY(state->search_entry), state);
-    }
-
+    refresh_app_install_badges(state);
     update_action_bar_visibility(state);
 }
 
@@ -974,10 +1441,11 @@ static void activate(GtkApplication *app, AppState *state) {
     state->selected_manufacturer_id = g_strdup("Samsung");
     state->app_list = NULL;
     state->uninstalled_app_list = NULL;
+    state->installed_packages_set = NULL;
 
     state->window = ADW_APPLICATION_WINDOW(adw_application_window_new(GTK_APPLICATION(app)));
     gtk_window_set_title(GTK_WINDOW(state->window), "Android Debloater");
-    gtk_window_set_default_size(GTK_WINDOW(state->window), 960, 640);
+    gtk_window_set_default_size(GTK_WINDOW(state->window), 980, 660);
 
     GtkWidget *main_content_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     adw_application_window_set_content(state->window, main_content_box);
@@ -996,6 +1464,7 @@ static void activate(GtkApplication *app, AppState *state) {
     GtkWidget *stack = gtk_stack_new();
     gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(stack_switcher), GTK_STACK(stack));
     gtk_box_append(GTK_BOX(main_content_box), stack);
+    g_signal_connect(stack, "notify::visible-child-name", G_CALLBACK(on_stack_page_changed), state);
 
     // --- PAGE 1: DEBLOAT ---
     GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
@@ -1046,7 +1515,7 @@ static void activate(GtkApplication *app, AppState *state) {
     state->device_list_box = gtk_list_box_new();
     gtk_widget_add_css_class(state->device_list_box, "boxed-list");
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(state->device_list_box), GTK_SELECTION_SINGLE);
-    g_signal_connect(state->device_list_box, "row-activated", G_CALLBACK(on_device_selected), state);
+    g_signal_connect(state->device_list_box, "row-selected", G_CALLBACK(on_device_selected), state);
 
     GtkWidget *device_scrolled = gtk_scrolled_window_new();
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(device_scrolled), state->device_list_box);
@@ -1073,6 +1542,11 @@ static void activate(GtkApplication *app, AppState *state) {
     g_signal_connect(state->search_entry, "search-changed", G_CALLBACK(on_search_changed), state);
     gtk_box_append(GTK_BOX(controls_hbox), state->search_entry);
 
+    state->installed_only_toggle = gtk_toggle_button_new_with_label("Installed Only");
+    gtk_widget_set_tooltip_text(state->installed_only_toggle, "Show only packages installed on the selected device");
+    g_signal_connect(state->installed_only_toggle, "toggled", G_CALLBACK(on_installed_only_toggled), state);
+    gtk_box_append(GTK_BOX(controls_hbox), state->installed_only_toggle);
+
     GtkWidget *select_all_btn = gtk_button_new_with_label("Select All");
     g_signal_connect(select_all_btn, "clicked", G_CALLBACK(on_select_all_clicked), state);
     gtk_box_append(GTK_BOX(controls_hbox), select_all_btn);
@@ -1098,7 +1572,7 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_action_bar_pack_start(GTK_ACTION_BAR(state->action_bar), state->status_label);
 
     state->debloat_button = gtk_button_new_with_label("Remove Selected");
-    gtk_widget_set_tooltip_text(state->debloat_button, "Uninstall selected apps from connected device");
+    gtk_widget_set_tooltip_text(state->debloat_button, "Uninstall or disable selected apps on connected device");
     gtk_widget_add_css_class(state->debloat_button, "destructive-action");
     gtk_action_bar_pack_end(GTK_ACTION_BAR(state->action_bar), state->debloat_button);
     g_signal_connect(state->debloat_button, "clicked", G_CALLBACK(on_debloat_clicked), state);
@@ -1113,7 +1587,7 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_widget_set_margin_bottom(undo_page_box, 16);
     gtk_stack_add_titled(GTK_STACK(stack), undo_page_box, "undo", "Undo");
 
-    GtkWidget *uninstalled_header = gtk_label_new("Recently Uninstalled (Restore)");
+    GtkWidget *uninstalled_header = gtk_label_new("Removed or Disabled Packages (Saved Per Device)");
     gtk_widget_add_css_class(uninstalled_header, "heading");
     gtk_label_set_xalign(GTK_LABEL(uninstalled_header), 0.0);
     gtk_box_append(GTK_BOX(undo_page_box), uninstalled_header);
@@ -1156,10 +1630,10 @@ static void activate(GtkApplication *app, AppState *state) {
     g_signal_connect(state->debug_command_entry, "activate", G_CALLBACK(on_run_debug_command_clicked), state);
     gtk_box_append(GTK_BOX(debug_hbox), state->debug_command_entry);
 
-    GtkWidget *debug_run_button = gtk_button_new_with_label("Execute");
-    gtk_widget_add_css_class(debug_run_button, "suggested-action");
-    g_signal_connect(debug_run_button, "clicked", G_CALLBACK(on_run_debug_command_clicked), state);
-    gtk_box_append(GTK_BOX(debug_hbox), debug_run_button);
+    state->debug_run_button = gtk_button_new_with_label("Execute");
+    gtk_widget_add_css_class(state->debug_run_button, "suggested-action");
+    g_signal_connect(state->debug_run_button, "clicked", G_CALLBACK(on_run_debug_command_clicked), state);
+    gtk_box_append(GTK_BOX(debug_hbox), state->debug_run_button);
 
     GtkWidget *output_header = gtk_label_new("Command Output");
     gtk_widget_add_css_class(output_header, "heading");
@@ -1181,7 +1655,7 @@ static void activate(GtkApplication *app, AppState *state) {
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(debug_scrolled), debug_output_view);
 
     update_device_list(state);
-    populate_adb_devices(state);
+    populate_adb_devices_async(state);
 
     gtk_window_present(GTK_WINDOW(state->window));
     show_welcome_dialog(GTK_WINDOW(state->window));
@@ -1192,21 +1666,18 @@ static void on_shutdown(GtkApplication *app, gpointer user_data) {
     (void)user_data;
     if (!app_state) return;
 
-    if (app_state->selected_device_id) {
-        g_free(app_state->selected_device_id);
-    }
-    if (app_state->selected_manufacturer_id) {
-        g_free(app_state->selected_manufacturer_id);
+    g_free(app_state->selected_device_id);
+    g_free(app_state->selected_manufacturer_id);
+    g_list_free(app_state->pending_debloat_queue);
+
+    if (app_state->installed_packages_set) {
+        g_hash_table_destroy(app_state->installed_packages_set);
     }
     if (app_state->device_model) {
         g_object_unref(app_state->device_model);
     }
-    if (app_state->uninstalled_app_list) {
-        g_list_free_full(app_state->uninstalled_app_list, (GDestroyNotify)app_item_free);
-    }
-    if (app_state->app_list) {
-        g_list_free_full(app_state->app_list, (GDestroyNotify)app_item_free);
-    }
+    g_list_free_full(app_state->uninstalled_app_list, (GDestroyNotify)app_item_free);
+    g_list_free_full(app_state->app_list, (GDestroyNotify)app_item_free);
     g_free(app_state);
     app_state = NULL;
 }
