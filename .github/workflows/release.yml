@@ -27,7 +27,8 @@ jobs:
 
     - name: Compile
       run: |
-        gcc app.c -o debloater $(pkg-config --cflags --libs gtk4 libadwaita-1)
+        glib-compile-resources --target=resources.c --generate-source resources.xml
+	gcc -Wall -O2 -o debloater app.c resources.c $(pkg-config --cflags --libs gtk4 libadwaita-1)
 
     - name: Create Release and Upload Asset
       uses: softprops/action-gh-release@v1

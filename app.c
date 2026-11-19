@@ -150,24 +150,37 @@ static gchar *resolve_packages_ini_path(void) {
 }
 
 static void load_packages_ini(AppState *state) {
-    gchar *path = resolve_packages_ini_path();
-    if (!path) {
-        g_warning("Could not locate packages.ini");
-        return;
-    }
-
     GKeyFile *kf = g_key_file_new();
     GError *error = NULL;
-    if (!g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, &error)) {
+    gchar *path = resolve_packages_ini_path();
+
+    if (path) {
+        if (g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, &error)) {
+            state->packages_key_file = kf;
+            g_free(path);
+            return;
+        }
         g_warning("Failed to load %s: %s", path, error ? error->message : "unknown error");
-        if (error) g_error_free(error);
-        g_key_file_free(kf);
+        g_clear_error(&error);
         g_free(path);
-        return;
     }
 
-    state->packages_key_file = kf;
-    g_free(path);
+    GBytes *embedded = g_resources_lookup_data("/com/gemini/debloater/packages.ini", G_RESOURCE_LOOKUP_FLAGS_NONE, &error);
+    if (embedded) {
+        if (g_key_file_load_from_bytes(kf, embedded, G_KEY_FILE_NONE, &error)) {
+            state->packages_key_file = kf;
+            g_bytes_unref(embedded);
+            return;
+        }
+        g_warning("Failed to parse embedded packages.ini: %s", error ? error->message : "unknown error");
+        g_clear_error(&error);
+        g_bytes_unref(embedded);
+    } else {
+        g_warning("Could not locate external or embedded packages.ini: %s", error ? error->message : "not found");
+        g_clear_error(&error);
+    }
+
+    g_key_file_free(kf);
 }
 
 // --- HELPER FUNCTIONS ---
